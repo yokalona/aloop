@@ -1,4 +1,4 @@
-(defproject io.github.yokalona/aloop "1.0.3"
+(defproject io.github.yokalona/aloop "1.1.0"
   :description "Set of useful macros and functions"
   :url "https://github.com/yokalona/aloop"
   :license {:name "EPL-2.0 OR GPL-2.0-or-later WITH Classpath-exception-2.0"

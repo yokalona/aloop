@@ -1,35 +1,10 @@
 (ns aloop.core)
 
-(declare
-  block
-  !!!
-  example
-  if-
-  if->
-  if-|>
-  if->>
-  if-<|
-  if+
-  if+>
-  if+|>
-  if+>>
-  if+<|
-  with->
-  with-|>
-  with->>
-  with-<|
-  <->
-  <->>
-  <<->
-  <<->>
-  |>
-  <|
-  rotate
-  add->>seq
-  add->seq
-  replace->>seq
-  replace->seq
-  swap)
+(declare block !!! example
+         if- if-> if-|> if->> if-<| if+ if+> if+|> if+>> if+<|
+         with-> with-|> with->> with-<|
+         <-> <->> <<-> <<->> |> <|
+         rotate add->>seq add->seq replace->>seq replace->seq swap)
 
 (defn- -natural->
   [x form]
@@ -462,8 +437,12 @@
 
 (defn add->>seq
   "Takes an arbitrary collection `where` and an element `what`. Adds `what` to the index `place` in `where`.
-  If no `place` provided - adds `what` to the end of `where`. Negatively rotates index `place`, i.e. counts indices
-  backwards, where last element is 0, second to last is 1 and so on."
+  If no `place` provided - adds `what` to the end of `where`. If only `what` provided - returns transducer.
+  Negatively rotates index `place`, i.e. counts indices backwards, where last element is 0, second to last
+  is 1 and so on."
+  ([what]
+   (fn [where]
+     (add->>seq where what)))
   ([where what]
    (if+ (seq? where)
         (->> where
@@ -474,6 +453,7 @@
    (add->seq where what (- (count where) place))))
 
 (example
+  ((add->>seq 5) '(1 2 3 4)) := '(1 2 3 4 5)
   (add->>seq '(1 2 3 4) 5) :=> '(1 2 3 4 5)
   (add->>seq '(1 2 3 4) 5 0) :=> '(1 2 3 4 5)
   (add->>seq '(1 2 3 4) 5 1) :=> '(1 2 3 5 4)
@@ -481,8 +461,11 @@
 
 (defn add->seq
   "Takes an arbitrary collection `where` and an element `what`. Adds `what` to the index `place` in `where`.
-  If no `place` provided - adds `what` to the beginning of `where`. Positively rotates index `place`,
-  i.e. counts indices forward, where first element is 0, second is 1 and so on."
+  If no `place` provided - adds `what` to the beginning of `where`. If only `what` provided - returns transducer.
+  Positively rotates index `place`, i.e. counts indices forward, where first element is 0, second is 1 and so on."
+  ([what]
+   (fn [where]
+     (add->seq where what)))
   ([where what]
    (add->seq where what 0))
   ([where what place]
@@ -493,6 +476,7 @@
                (concat (add->>seq (take place where) what)))))))
 
 (example
+  ((add->seq 5) '(1 2 3 4)) :=> '(5 1 2 3 4)
   (add->seq '(1 2 3 4) 5) :=> '(5 1 2 3 4)
   (add->seq '(1 2 3 4) 5 3) :=> '(1 2 3 5 4)
   (add->seq '(1 2 3 4) 5 0) :=> '(5 1 2 3 4)
@@ -500,8 +484,11 @@
 
 (defn replace->>seq
   "Takes an arbitrary collection `where` and an element `what`. Replaces `what` on the index `place` in `where`.
-  If no `place` provided - changes nothing. Negatively rotates index `place`, i.e. counts indices backwards,
-  where last element is 0, second to last is 1 and so on."
+  If no `place` provided - changes nothing. If only `what` provided - returns transducer. Negatively rotates index
+  `place`, i.e. counts indices backwards, where last element is 0, second to last is 1 and so on."
+  ([what]
+   (fn [where]
+     (replace->>seq where what)))
   ([where what]
    (if+ (seq? where)
         (if- (empty? where)
@@ -512,6 +499,7 @@
    (replace->seq where what (-> where count (- place 1)))))
 
 (example
+  ((replace->>seq 4) '(1 2 3)) :=> '(1 2 4)
   (replace->>seq '(1 2 3) 4) :=> '(1 2 4)
   (replace->>seq '(1 2 3) 4 0) :=> '(1 2 4)
   (replace->>seq '(1 2 3) 4 1) :=> '(1 4 3)
@@ -519,8 +507,11 @@
 
 (defn replace->seq
   "Takes an arbitrary collection `where` and an element `what`. Replaces `what` on the index `place` in `where`.
-  If no `place` provided - changes nothing. Positively rotates index `place`, i.e. counts indices forward, where
-  first element is 0, second is 1 and so on."
+  If no `place` provided - changes nothing. If only `what` provided - returns transducer. Positively rotates index
+  `place`, i.e. counts indices forward, where first element is 0, second is 1 and so on."
+  ([what]
+   (fn [where]
+     (replace->seq where what)))
   ([where what]
    (replace->seq where what 0))
   ([where what place]
@@ -532,6 +523,7 @@
               (add->seq what place))))))
 
 (example
+  ((replace->seq 4) '(1 2 3)) :=> '(1 2 4)
   (replace->seq '(1 2 3) 4) :=> '(1 2 4)
   (replace->seq '(1 2 3) 4 0) :=> '(4 2 3)
   (replace->seq '(1 2 3) 4 -1) :=> '(1 2 4))
@@ -540,16 +532,20 @@
   "Takes an arbitrary collection `where` and two indices: `left` and `right`. Swaps value on the `left` with the value
   on the `right`. Positively rotates both indices `place`, i.e. counts indices forward, where first element is 0, second
   is 1 and so on."
-  [where left right]
-  (if+ (seq? where)
-       (if- (empty? where)
-            (let [left-value (nth where (rotate (count where) left))
-                  right-value (nth where (rotate (count where) right))]
-              (-> where
-                  (replace->seq right-value left)
-                  (replace->seq left-value right))))))
+  ([left right]
+   (fn [where]
+     (swap where left right)))
+  ([where left right]
+   (if+ (seq? where)
+        (if- (empty? where)
+             (let [left-value (nth where (rotate (count where) left))
+                   right-value (nth where (rotate (count where) right))]
+               (-> where
+                   (replace->seq right-value left)
+                   (replace->seq left-value right)))))))
 
 (example
+  ((swap 0 3) '(1 2 3 4 5)) :=> '(4 2 3 1 5)
   (swap '(1 2 3 4 5) 0 0) :=> '(1 2 3 4 5)
   (swap '(1 2 3 4 5) 0 3) :=> '(4 2 3 1 5)
   (swap '(1 2 3 4 5) 0 -1) :=> '(5 2 3 4 1)
