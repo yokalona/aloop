@@ -47,6 +47,10 @@
   [& forms]
   `(comment ~@forms))
 
+(defmacro block
+  [& forms]
+  `(comment ~@forms))
+
 (block "Index manipulations")
 
 (defn rotate
