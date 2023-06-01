@@ -1,5 +1,33 @@
 (ns aloop.core)
 
+(defn- -natural->
+  [x form]
+  (with-meta `(~(first form) ~x ~@(next form)) (meta form)))
+
+(defn- -natural->>
+  [x form]
+  (with-meta `(~(first form) ~@(next form) ~x) (meta form)))
+
+(declare !!!
+         example
+         rotate
+         add->>seq
+         add->seq
+         replace->>seq
+         replace->seq
+         if-
+         if->
+         if->>
+         if+
+         if+>
+         if+>>
+         with->
+         with->>
+         <->
+         <->>
+         <<->
+         <<->>)
+
 (defmacro !!!
   "Triple caution or attention macro"
   [& forms]
@@ -8,6 +36,125 @@
 (defmacro example
   [& forms]
   `(comment ~@forms))
+
+(defn rotate
+  "Takes and `index` and right border `c`. Rotates index around the segment of `0..c`"
+  [c index]
+  (if (neg? index)
+    (recur c (+ c index))
+    (if+ (>= index c)
+         (recur c (mod index c)))))
+
+(example
+  (rotate 3 0) :=> 0
+
+  (rotate 3 4) :=> 1
+
+  (rotate 3 -1) :=> 2)
+
+(defn add->>seq
+  "Takes an arbitrary collection `where` and an element `what`. Adds `what` to the index `place` in `where`.
+  If no `place` provided - adds `what` to the end of `where`. Negatively rotates index `place`, i.e. counts indices
+  backwards, where last element is 0, second to last is 1 and so on."
+  ([where what]
+   (->> where
+        reverse
+        (cons what)
+        reverse))
+  ([where what place]
+   (add->seq where what (- (count where) place))))
+
+(example
+  (add->>seq '(1 2 3 4) 5) :=> '(1 2 3 4 5)
+
+  (add->>seq '(1 2 3 4) 5 0) :=> '(1 2 3 4 5)
+
+  (add->>seq '(1 2 3 4) 5 1) :=> '(1 2 3 5 4)
+
+  (add->>seq '(1 2 3 4) 5 -1) :=> '(5 1 2 3 4))
+
+(defn add->seq
+  "Takes an arbitrary collection `where` and an element `what`. Adds `what` to the index `place` in `where`.
+  If no `place` provided - adds `what` to the beginning of `where`. Positively rotates index `place`,
+  i.e. counts indices forward, where first element is 0, second is 1 and so on."
+  ([where what]
+   (add->seq where what 0))
+  ([where what place]
+   (let [place (-> where count inc (rotate place))]
+     (->> where
+          (drop place)
+          (concat (add->>seq (take place where) what))))))
+
+(example
+  (add->seq '(1 2 3 4) 5) :=> '(5 1 2 3 4)
+
+  (add->seq '(1 2 3 4) 5 3) :=> '(1 2 3 5 4)
+
+  (add->seq '(1 2 3 4) 5 0) :=> '(5 1 2 3 4)
+
+  (add->>seq '(1 2 3 4) 5 -1) :=> '(1 2 3 4 5))
+
+(defn replace->>seq
+  "Takes an arbitrary collection `where` and an element `what`. Replaces `what` on the index `place` in `where`.
+  If no `place` provided - changes nothing. Negatively rotates index `place`, i.e. counts indices backwards,
+  where last element is 0, second to last is 1 and so on."
+  ([where what]
+   (if- (empty? where)
+        (-> where
+            (drop-last)
+            (add->>seq what))))
+  ([where what place]
+   (replace->seq where what (-> where count (- place 1)))))
+
+(example
+  (replace->>seq '(1 2 3) 4) :=> '(1 2 4)
+
+  (replace->>seq '(1 2 3) 4 0) :=> '(1 2 4)
+
+  (replace->>seq '(1 2 3) 4 1) :=> '(1 4 3)
+
+  (replace->>seq '(1 2 3) 4 -1) :=> '(4 2 3))
+
+(defn replace->seq
+  "Takes an arbitrary collection `where` and an element `what`. Replaces `what` on the index `place` in `where`.
+  If no `place` provided - changes nothing. Positively rotates index `place`, i.e. counts indices forward, where
+  first element is 0, second is 1 and so on."
+  ([where what]
+   (replace->seq where what 0))
+  ([where what place]
+   (let [place (-> where count (rotate place))]
+     (-> place
+         (take where)
+         (concat (drop (inc place) where))
+         (add->seq what place)))))
+
+(example
+  (replace->seq '(1 2 3) 4) :=> '(1 2 4)
+
+  (replace->seq '(1 2 3) 4 0) :=> '(4 2 3)
+
+  (replace->seq '(1 2 3) 4 -1) :=> '(1 2 4))
+
+(defn swap
+  "Takes an arbitrary collection `where` and two indices: `left` and `right`. Swaps value on the `left` with the value
+  on the `right`. Positively rotates both indices `place`, i.e. counts indices forward, where first element is 0, second
+  is 1 and so on."
+  [where left right]
+  (if- (empty? where)
+       (let [left-value (nth where (rotate (count where) left))
+             right-value (nth where (rotate (count where) right))]
+         (-> where
+             (replace->seq right-value left)
+             (replace->seq left-value right)))))
+
+(example
+  (swap '(1 2 3 4 5) 0 0) :=> '(1 2 3 4 5)
+
+  (swap '(1 2 3 4 5) 0 3) :=> '(4 2 3 1 5)
+
+  (swap '(1 2 3 4 5) 0 -1) :=> '(5 2 3 4 1)
+
+  (swap '(1 2 3 4 5) -1 -2) :=> '(1 2 3 5 4))
 
 (defmacro if-
   "Takes `predicate p` of at least one argument and a list of `forms`.
@@ -20,10 +167,12 @@
 (example
   (if- (keyword? 'bar)
        :foo)
+
   :=> :foo
 
   (if- (keyword? :bar)
        :foo)
+
   :=> :bar)
 
 (defmacro if->
@@ -39,12 +188,14 @@
         name
         clojure.string/upper-case
         keyword)
+
   :=> :BAR
 
   (if-> (keyword? :bar)
         name
         clojure.string/upper-case
         keyword)
+
   :=> :bar)
 
 (defmacro if->>
@@ -60,12 +211,14 @@
          name
          (clojure.string/replace "abc" #"c")
          keyword)
+
   :=> :abbar
 
   (if->> (keyword? :bar)
          name
          (clojure.string/replace "abc" #"c")
          keyword)
+
   :=> :bar)
 
 (defmacro if+
@@ -79,10 +232,12 @@
 (example
   (if+ (keyword? :bar)
        (name :bar))
+
   :=> "bar"
 
   (if+ (keyword? 'bar)
        :foo)
+
   :=> 'bar)
 
 (defmacro if+>
@@ -98,12 +253,14 @@
         name
         clojure.string/upper-case
         symbol)
+
   :=> 'BAR
 
   (if+> (keyword? 'bar)
         name
         clojure.string/upper-case
         symbol)
+
   :=> 'bar)
 
 (defmacro if+>>
@@ -119,12 +276,14 @@
          name
          (clojure.string/replace "abc" #"c")
          keyword)
+
   :=> :abbar
 
   (if+>> (keyword? 'bar)
          name
          (clojure.string/replace "abc" #"c")
          keyword)
+
   :=> 'bar)
 
 (defmacro with->
@@ -136,7 +295,7 @@
     (if forms
       (let [form (first forms)
             with (if (seq? form)
-                   (with-meta `(~(first form) ~x ~@(next form)) (meta form))
+                   (-natural-> x form)
                    (list form x))]
         (recur (concat d (list with)) (next forms)))
       d)))
@@ -145,6 +304,7 @@
   (with-> 722
           println
           inc)
+
   > 722
   :=> 723)
 
@@ -157,7 +317,7 @@
     (if forms
       (let [form (first forms)
             with (if (seq? form)
-                   (with-meta `(~(first form) ~@(next form) ~x) (meta form))
+                   (-natural->> x form)
                    (list form x))]
         (recur (concat d (list with)) (next forms)))
       d)))
@@ -166,5 +326,104 @@
   (with->> 722
            println
            inc)
+
   > 722
   :=> 723)
+
+(defmacro <->
+  "Take a form of any args and switch places for first and second arg if any"
+  {::aloop {::before-thread? true}}
+  [form]
+  (if+ (coll? form)
+       (case (count form)
+         1 `(~(first form))
+         2 `(~(first form) ~(second form))
+         `(~(first form) ~(nth form 2) ~(second form) ~@(drop 3 form)))))
+
+(example
+  (<-> (println :foo :boo :loo))
+  > :boo :foo :loo
+  :=> nil)
+
+(defmacro <->>
+  "Take a form of any args and switch places for last and second to last arg if any"
+  {::aloop {::before-thread? true}}
+  [form]
+  (if+ (coll? form)
+       (case (count form)
+         1 `(~(first form))
+         2 `(~(first form) ~(second form))
+         (swap form -2 -1))))
+
+(example
+  (<->> (println :foo :boo :loo))
+  > :foo :loo :boo
+  :=> nil)
+
+(defmacro <<->>
+  "Take a form of any args and switch places for first and last arg if any"
+  [form]
+  {::aloop {::before-thread? true}}
+  (if+ (coll? form)
+       (case (count form)
+         1 `(~(first form))
+         2 `(~(first form) ~(second form))
+         (swap form -1 1))))
+
+(example
+  (<<->> (println :foo :boo :loo))
+  > :loo :boo :foo
+  :=> nil)
+
+(defmacro <<->
+  "Alias for `<->`"
+  [form]
+  {::aloop {::before-thread? true}}
+  `(<-> ~form))
+
+(example
+  (<<-> (println :foo :boo))
+  > :boo :foo
+  :=> nil)
+
+(defmacro |>
+  "Same as `->`, but if stumbles across any macro marked as :before-thread? - then firstly executes its form and
+  then threads"
+  [x & forms]
+  (loop [x x, forms forms]
+    (if forms
+      (let [form (first forms)
+            threaded (if (seq? form)
+                       (if `(get-in (meta (var ~(first form))) [::aloop ::before-thread?])
+                         (let [[op form] form]
+                           `(~op ~(-natural-> x form)))
+                         (-natural-> x form))
+                       (list form x))]
+        (recur threaded (next forms)))
+      x)))
+
+(example
+  (|> 0 inc inc str keyword (<-> (println :1 :3 :4 :5)))
+  > :1 :2 :3 :4 :5
+  :=> nil)
+
+(defmacro <|
+  "Same as `->`, but if stumbles across any macro marked as :before-thread? - then firstly executes its form and
+  then threads"
+  [x & forms]
+  (loop [x x, forms forms]
+    (if forms
+      (let [form (first forms)
+            threaded (if (seq? form)
+                       (if `(get-in (meta (var ~(first form))) [::aloop ::before-thread?])
+                         (let [[op form] form]
+                           `(~op ~(-natural->> x form)))
+                         (-natural->> x form))
+                       (list form x))]
+        (recur threaded (next forms)))
+      x)))
+
+(example
+  (<| 5 dec str keyword (<->> (println :1 :2 :3 :5)))
+  > :1 :2 :3 :4 :5
+  :=> nil)
