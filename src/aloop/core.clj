@@ -3,7 +3,8 @@
 (declare if- if-> if-|> if->> if-<| if+ if+> if+|> if+>> if+<|
          with-> with-|> with->> with-<|
          |-| |-> |->> <-| <<-| <-> <->> <<-> <<->> |> <|
-         rotate add->>seq add->seq replace->>seq replace->seq swap)
+         rotate add->>seq add->seq replace->>seq replace->seq swap
+         mix)
 
 (def ^:private before-thread ['|-| '|-> '|->> '<-| '<<-| '<-> '<->> '<<-> '<<->>])
 
@@ -350,7 +351,7 @@
 (defmacro |-|
   "Takes a `form` and two indices: `l` and `r`. Switch places `lth` arg with `rth` arg of `form` if any. Positively
   rotates both indices, i.e. counts indices forward, where first element is 0, second is 1 and so on. If index is
-  negative - counts indices negatively, i.e. last element is 0, second to last - 1.
+  negative - counts indices negatively, i.e. last element is -1, second to last - -2.
 
   **Examples**
 
@@ -381,7 +382,7 @@
 (defmacro |->
   "Takes a `form` and index `i`. Switch places for `1st` arg with `ith` arg of `form` if any. Positively rotates index
   `i`, i.e. counts indices forward, where first element is 0, second is 1 and so on. If index is negative - counts
-  indices negatively, i.e. last element is 0, second to last - 1.
+  indices negatively, i.e. last element is -1, second to last - -2.
 
   **Examples**
 
@@ -412,7 +413,7 @@
 (defmacro |->>
   "Takes a `form` and index `i`. Switch places for `last` arg with `ith` arg of `form` if any. Positively rotates index
   `i`, i.e. counts indices forward, where first element is 0, second is 1 and so on. If index is negative - counts
-  indices negatively, i.e. last element is 0, second to last - 1.
+  indices negatively, i.e. last element is -1, second to last - -2.
 
   **Examples**
 
@@ -869,3 +870,32 @@
                (-> where
                    (replace->seq right-value left)
                    (replace->seq left-value right)))))))
+
+(defn mix
+  "Takes a function `f` with fewer than normal arguments and two indices: `l` and `r`. Switch places `lth` arg with
+  `rth` arg of `form` if any. Returns new function with args switched. Positively rotates both indices, i.e. counts
+  indices forward, where first element is 0, second is 1 and so on. If index is negative - counts indices negatively,
+  i.e. last element is -1, second to last - -2.
+
+  **Examples**
+
+  ```clojure
+  (mix 0 1 (?fn? :1 :2 :3) :4 :5)
+
+  :=> [:2 :1 :3 :4 :5]
+  ```
+
+  See: [[rotate]] [[|-|]]"
+  [l r & args]
+  (fn [& fargs]
+    (|> args
+        next
+        (concat fargs)
+        (swap l r)
+        (<-> (apply (first args))))))
+
+(defn over
+  ""
+  [f & args]
+  (apply f args)
+  args)

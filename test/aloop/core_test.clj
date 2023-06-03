@@ -3,7 +3,8 @@
   (:require [aloop.core :refer [if- if-> if-|> if->> if-<| if+ if+> if+|> if+>> if+<|
                                 with-> with-|> with->> with-<|
                                 |-| |-> |->> <-| <<-| <-> <->> <<-> <<->> |> <|
-                                rotate add->>seq add->seq replace->>seq replace->seq swap]]))
+                                rotate add->>seq add->seq replace->>seq replace->seq swap
+                                mix]]))
 
 (defn ?fn? [& args] args)
 
@@ -380,3 +381,8 @@
              (swap '(1 2 3 4 5) 0 3) '(4 2 3 1 5)
              (swap '(1 2 3 4 5) 0 -1) '(5 2 3 4 1)
              (swap '(1 2 3 4 5) -1 -2) '(1 2 3 5 4)))
+
+(deftest mix-test
+  (are [x y] (= x y)
+             ((mix 0 1 ?fn? 1 2 3) 4 5)
+             [2 1 3 4 5]))
