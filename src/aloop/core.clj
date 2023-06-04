@@ -1,12 +1,27 @@
-(ns aloop.core)
+(ns aloop.core
+  (:require [clojure.string :as str]
+            [clojure.pprint :as pprint]))
 
-(declare if- if-> if-|> if->> if-<| if+ if+> if+|> if+>> if+<|
-         with-> with-|> with->> with-<|
-         |-| |-> |->> <-| <<-| <-> <->> <<-> <<->> |> <|
-         rotate add->>seq add->seq replace->>seq replace->seq swap
-         mix)
+(declare
+  ;; Divers set of IFs, usually for singular branch.
+  if- if-> if-|> if->> if-<| if+ if+> if+|> if+>> if+<|
+  ;; Declarative operations for over throwing args
+  with-> with-|> with->> with-<|
+  ;; Function argument order manipulation
+  |-| |-> |->> <-| <<-| <-> <->> <<-> <<->>
+  ;; Threading
+  |> <|
+  ;; Debug examination
+  sneak
+  ;; Sequential modification
+  rotate add->>seq add->seq replace->>seq replace->seq swap
+  ;; Functions manipulation
+  mix over
+  ;; private
+  -pretty-str)
 
-(def ^:private before-thread ['|-| '|-> '|->> '<-| '<<-| '<-> '<->> '<<-> '<<->>])
+;; FIXME: use meta instead
+(def ^:private before-thread ['|-| '|-> '|->> '<-| '<<-| '<-> '<->> '<<-> '<<->> 'sneak])
 
 (defn- -natural->
   [x form]
@@ -619,7 +634,7 @@
       x)))
 
 (defmacro <|
-  " Same as `->> `, but if stumbles across any macro marked as :before-thread? - then firstly executes its form and
+  "Same as `->>`, but if stumbles across any macro marked as :before-thread? - then firstly executes its form and
   then threads
 
   **Examples**
@@ -646,6 +661,18 @@
         (recur threaded (next forms)))
       x)))
 
+(defmacro sneak
+  "Prints to *out* the result of `form` and `form` itself. Doesn't execute form until later"
+  ^{::aloop {::before-thread? true}}
+  [form]
+  (let [f (-pretty-str form 3)
+        file *file*
+        line `~(:line (meta &form))
+        f (if+<| (str/includes? f "\n") (str "\n"))]
+    `(let [result# ~form]
+       (println (format "sneak:\n\tfile\t: [%s:%s]\n\tform\t: %s\n\tresult\t: %s" ~file ~line ~f result#))
+       result#)))
+
 (defn rotate
   "Takes an `index`and right border `c`. Envelops `index` around the length of `c`, if `index` is positive - envelopes
   clockwise, otherwise - counterclockwise. In other words, uses different approaches for indexing a collection of
@@ -655,11 +682,12 @@
 
   **Examples**
 
-  | array 'arr'       |  1 |  2 |  3 |  4 |  5 |
-  |-------------------|----|----|----|----|----|
-  | positive indexing |  0 |  1 |  2 |  3 |  4 |
-  | negative indexing | -5 | -4 | -3 | -2 | -1 |
-
+  | array 'arr'       |  1  |  2  |  3  |  4  |  5  |
+  |-------------------|-----|-----|-----|-----|-----|
+  | positive indexing |  0  |  1  |  2  |  3  |  4  |
+  | positive indexing | -5  | -4  | -3  | -2  | -1  |
+  | negative indexing | -4  | -3  | -2  | -1  |  0  |
+  | negative indexing |  1  |  2  |  3  |  4  |  5  |
 
   ```clojure
   (rotate (count arr) 0) :=> 0
@@ -706,7 +734,7 @@
    (fn [where]
      (add->>seq where what)))
   ([where what]
-   (if+ (seq? where)
+   (if+ (sequential? where)
         (->> where
              reverse
              (cons what)
@@ -748,7 +776,7 @@
   ([where what]
    (add->seq where what 0))
   ([where what place]
-   (if+ (seq? where)
+   (if+ (sequential? where)
         (let [place (-> where count inc (rotate place))]
           (->> where
                (drop place)
@@ -786,7 +814,7 @@
    (fn [where]
      (replace->>seq where what)))
   ([where what]
-   (if+ (seq? where)
+   (if+ (sequential? where)
         (if- (empty? where)
              (-> where
                  (drop-last)
@@ -824,7 +852,7 @@
   ([where what]
    (replace->seq where what 0))
   ([where what place]
-   (if+ (seq? where)
+   (if+ (sequential? where)
         (let [place (-> where count (rotate place))]
           (-> place
               (take where)
@@ -863,7 +891,7 @@
    (fn [where]
      (swap where left right)))
   ([where left right]
-   (if+ (seq? where)
+   (if+ (sequential? where)
         (if- (empty? where)
              (let [left-value (nth where (rotate (count where) left))
                    right-value (nth where (rotate (count where) right))]
@@ -895,7 +923,15 @@
         (<-> (apply (first args))))))
 
 (defn over
-  ""
+  "Overthrows arguments applying f to args"
   [f & args]
   (apply f args)
   args)
+
+(defn- -pretty-str
+  [val indentation]
+  (<| val pprint/pprint
+      (pprint/with-pprint-dispatch pprint/code-dispatch)
+      with-out-str
+      str/trim-newline
+      (<<-> (str/replace #"\n" (str "\n" (apply str (repeat indentation "\t")))))))

@@ -2,9 +2,12 @@
   (:require [clojure.test :refer :all])
   (:require [aloop.core :refer [if- if-> if-|> if->> if-<| if+ if+> if+|> if+>> if+<|
                                 with-> with-|> with->> with-<|
-                                |-| |-> |->> <-| <<-| <-> <->> <<-> <<->> |> <|
+                                |-| |-> |->> <-| <<-| <-> <->> <<-> <<->>
+                                |> <|
+                                sneak
                                 rotate add->>seq add->seq replace->>seq replace->seq swap
-                                mix]]))
+                                mix over]]
+            [clojure.string :as str]))
 
 (defn ?fn? [& args] args)
 
@@ -353,6 +356,7 @@
 
 (deftest add->seq-test
   (are [x y] (= x y)
+             (add->seq [1 2 3 4] 5) [5 1 2 3 4]
              ((add->seq 5) '(1 2 3 4)) '(5 1 2 3 4)
              (add->seq '(1 2 3 4) 5) '(5 1 2 3 4)
              (add->seq '(1 2 3 4) 5 3) '(1 2 3 5 4)
@@ -386,3 +390,13 @@
   (are [x y] (= x y)
              ((mix 0 1 ?fn? 1 2 3) 4 5)
              [2 1 3 4 5]))
+
+(deftest over-test
+  (is (= (over ?fn? 1 2 3 4)
+         [1 2 3 4])))
+
+(deftest sneak-test
+  (let [s (with-out-str (sneak (-> 0 inc inc inc)))]
+    (is (str/includes? s "file\t: [aloop/core_test.clj:"))
+    (is (str/includes? s "form\t: (-> 0 inc inc inc)"))
+    (is (str/includes? s "result\t: 3"))))
