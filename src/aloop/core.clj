@@ -15,8 +15,8 @@
   sneak
   ;; Sequential modification
   rotate add->>seq add->seq replace->>seq replace->seq swap
-  ;; Functions manipulation
-  mix over
+  ;; Functions arguments manipulation
+  mix over switch-> switch->> <-switch <<-switch
   ;; private
   -pretty-str)
 
@@ -921,6 +921,42 @@
         (concat fargs)
         (swap l r)
         (<-> (apply (first args))))))
+
+(defn switch->
+  "Takes one `argument` and a function `f` with fewer than normal amount of args. Passes first argument to `f` in first
+  position. Acts exactly as
+  ```clojure
+  (switch-> :arg1 ?fn? :arg2 :arg3) ==> (f :arg1 :arg2 :arg3)
+  ```"
+  [arg f & args]
+  (apply f (add->seq arg args)))
+
+(defn switch->>
+  "Takes one `argument` and a function `f` with fewer than normal amount of args. Passes first argument to `f` in last
+  position. Acts exactly as
+  ```clojure
+  (switch->> :arg1 ?fn? :arg2 :arg3) ==> (f :arg2 :arg3 :arg1)
+  ```"
+  [arg f & args]
+  (apply f (add->>seq arg args)))
+
+(defn <-switch
+  "Takes one `argument` and a function `f` with fewer than normal amount of args. Passes `argument` to `f` in first
+  position. Acts exactly as
+  ```clojure
+  (<-switch ?fn? :arg1 :arg2 :arg3) ==> (f :arg3 :arg1 :arg2)
+  ```"
+  [f & args]
+  (apply f (swap 0 -1 args)))
+
+(defn <<-switch
+  "Takes one `argument` and a function `f` with fewer than normal amount of args. Passes `argument` to `f` in last
+  position. Acts exactly as
+  ```clojure
+  (<<-switch ?fn? :arg1 :arg2 :arg3) ==> (f :arg1 :arg2 :arg3)
+  ```"
+  [f & args]
+  (apply f args))
 
 (defn over
   "Overthrows arguments applying f to args"
