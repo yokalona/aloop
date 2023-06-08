@@ -18,7 +18,7 @@
   ;; Functions arguments manipulation
   mix over switch-> switch->> <-switch <<-switch
   ;; private
-  -pretty-str)
+  -pretty-str -before-thread?)
 
 ;; FIXME: use meta instead
 (def ^:private before-thread ['|-| '|-> '|->> '<-| '<<-| '<-> '<->> '<<-> '<<->> 'sneak])
@@ -420,8 +420,8 @@
   ```
 
   See: [[rotate]]"
-  [i form]
   {::aloop {::before-thread? true}}
+  [i form]
   (if+ (coll? form)
        (cons (first form) (swap (next form) i 0))))
 
@@ -451,8 +451,8 @@
   ```
 
   See: [[rotate]]"
-  [i form]
   {::aloop {::before-thread? true}}
+  [i form]
   (if+ (coll? form)
        (cons (first form) (swap (next form) i -1))))
 
@@ -482,8 +482,8 @@
   ```
 
   See: [[rotate]]"
-  [i form]
   {::aloop {::before-thread? true}}
+  [i form]
   `(|-> ~(- (inc i)) ~form))
 
 (defmacro <<-|
@@ -512,8 +512,8 @@
   ```
 
   See: [[rotate]]"
-  [i form]
   {::aloop {::before-thread? true}}
+  [i form]
   `(|->> ~(- (inc i)) ~form))
 
 (defmacro <->
@@ -578,8 +578,8 @@
 
   :=> nil
   ```"
-  [form]
   {::aloop {::before-thread? true}}
+  [form]
   `(|-| 0 -1 ~form))
 
 (defmacro <<->
@@ -600,8 +600,8 @@
 
   :=> nil
   ```"
-  [form]
   {::aloop {::before-thread? true}}
+  [form]
   `(<-> ~form))
 
 (defmacro |>
@@ -625,7 +625,7 @@
     (if forms
       (let [form (first forms)
             threaded (if (seq? form)
-                       (if (pos? (.indexOf before-thread (first form)))
+                       (if (-> form first resolve meta ::aloop ::before-thread? some?)
                          (let [[op form] form]
                            `(~op ~(-natural-> x form)))
                          (-natural-> x form))
