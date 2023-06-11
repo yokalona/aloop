@@ -6,7 +6,7 @@
                                 |> <|
                                 sneak
                                 rotate add->>seq add->seq replace->>seq replace->seq swap
-                                mix over]]
+                                mix over switch-> switch->> <-switch <<-switch]]
             [clojure.string :as str]))
 
 (defn ?fn? [& args] args)
@@ -400,3 +400,22 @@
     (is (str/includes? s "file\t: [aloop/core_test.clj:"))
     (is (str/includes? s "form\t: (-> 0 inc inc inc)"))
     (is (str/includes? s "result\t: 3"))))
+
+(deftest switch->-test
+  (is (= (switch-> :arg1 ?fn? :arg2 :arg3)
+         (?fn? :arg1 :arg2 :arg3))))
+
+(deftest swtch->>test
+  (is (= (switch->> :arg3 ?fn? :arg1 :arg2)
+         (?fn? :arg1 :arg2 :arg3))))
+
+(deftest <-swtch-test
+  (is (= (<-switch ?fn? :arg1 :arg2 :arg3)
+         (?fn? :arg3 :arg2 :arg1))))
+
+(deftest <<-swtch-test
+  (is (= (<<-switch ?fn? :arg1 :arg2 :arg3)
+         (?fn? :arg1 :arg2 :arg3))))
+
+(time (add->seq (range 5) 1))
+(time (cons 1 [2 3 4]))

@@ -13,15 +13,14 @@
   |> <|
   ;; Debug examination
   sneak
+  ;; Usability
+  ->map cond-map
   ;; Sequential modification
   rotate add->>seq add->seq replace->>seq replace->seq swap
   ;; Functions arguments manipulation
   mix over switch-> switch->> <-switch <<-switch
   ;; private
   -pretty-str -before-thread?)
-
-;; FIXME: use meta instead
-(def ^:private before-thread ['|-| '|-> '|->> '<-| '<<-| '<-> '<->> '<<-> '<<->> 'sneak])
 
 (defn- -natural->
   [x form]
@@ -653,7 +652,7 @@
     (if forms
       (let [form (first forms)
             threaded (if (seq? form)
-                       (if (pos? (.indexOf before-thread (first form)))
+                       (if (-> form first resolve meta ::aloop ::before-thread? some?)
                          (let [[op form] form]
                            `(~op ~(-natural->> x form)))
                          (-natural->> x form))
@@ -672,6 +671,31 @@
     `(let [result# ~form]
        (println (format "sneak:\n\tfile\t: [%s:%s]\n\tform\t: %s\n\tresult\t: %s" ~file ~line ~f result#))
        result#)))
+
+(defmacro ->map
+  "Creates map from provided `vars`
+
+  **Examples**
+
+  ```clojure
+  (let [a 1
+        b 2
+        c 3]
+        (->map a b c {:d 4}))
+
+  :=> {:a 1 :b 2 :c 3 :d 4}
+  ```"
+  [& keys]
+  (reduce (fn [acc x]
+            (if (map? x)
+              (merge acc x)
+              (assoc acc (keyword x) x))) {} keys))
+
+(defmacro cond-map
+  [col]
+  (reduce (fn [acc x] (-> acc (add->>seq (key x)) (add->>seq (val x))))
+          (list 'cond)
+          col))
 
 (defn rotate
   "Takes an `index`and right border `c`. Envelops `index` around the length of `c`, if `index` is positive - envelopes
@@ -929,7 +953,7 @@
   (switch-> :arg1 ?fn? :arg2 :arg3) ==> (f :arg1 :arg2 :arg3)
   ```"
   [arg f & args]
-  (apply f (add->seq arg args)))
+  (apply f (add->seq args arg)))
 
 (defn switch->>
   "Takes one `argument` and a function `f` with fewer than normal amount of args. Passes first argument to `f` in last
@@ -938,7 +962,7 @@
   (switch->> :arg1 ?fn? :arg2 :arg3) ==> (f :arg2 :arg3 :arg1)
   ```"
   [arg f & args]
-  (apply f (add->>seq arg args)))
+  (apply f (add->>seq args arg)))
 
 (defn <-switch
   "Takes one `argument` and a function `f` with fewer than normal amount of args. Passes `argument` to `f` in first
@@ -947,7 +971,7 @@
   (<-switch ?fn? :arg1 :arg2 :arg3) ==> (f :arg3 :arg1 :arg2)
   ```"
   [f & args]
-  (apply f (swap 0 -1 args)))
+  (apply f (swap args 0 -1)))
 
 (defn <<-switch
   "Takes one `argument` and a function `f` with fewer than normal amount of args. Passes `argument` to `f` in last
