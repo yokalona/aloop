@@ -9,6 +9,8 @@
   with-> with-|> with->> with-<|
   ;; Function argument order manipulation
   |-| |-> |->> <-| <<-| <-> <->> <<-> <<->>
+  ;; Threading result ignoring
+  over-> over->> <-over <<-over
   ;; Threading
   |> <|
   ;; Debug examination
@@ -20,7 +22,18 @@
   ;; Functions arguments manipulation
   mix over switch-> switch->> <-switch <<-switch
   ;; private
-  -pretty-str -before-thread?)
+  -pretty-str -natural-> -natural->> -seq-over-> -form-over-> -seq-over->> -form-over->>)
+
+;; PRIVATE
+
+(defn- -pretty-str
+  [val indentation]
+  (let [a (->> val
+       pprint/pprint
+       (pprint/with-pprint-dispatch pprint/code-dispatch)
+       with-out-str
+       str/trim-newline)]
+    (str/replace a #"\n" (str "\n" (apply str (repeat indentation "\t"))))))
 
 (defn- -natural->
   [x form]
@@ -29,6 +42,30 @@
 (defn- -natural->>
   [x form]
   (with-meta `(~(first form) ~@(next form) ~x) (meta form)))
+
+(defn- -seq-over->
+  [arg form]
+  `(let [p# ~arg]
+     (~(first form) p# ~@(next form))
+     p#))
+
+(defn- -form-over->
+  [arg form]
+  `(let [p# ~arg]
+     (~form p#)
+     p#))
+
+(defn- -seq-over->>
+  [form arg]
+  `(let [p# ~arg]
+     (~(first form) ~@(next form) p#)
+     p#))
+
+(defn- -form-over->>
+  [form arg]
+  `(let [p# ~arg]
+     (~form p#)
+     p#))
 
 (defmacro if-
   "Takes `predicate p` of at least one argument and a list of `forms`.
@@ -603,6 +640,83 @@
   [form]
   `(<-> ~form))
 
+(defmacro over->
+  "Takes an argument `arg` and a `form`, executes a form with arg as first argument and then ignores form result,
+  and returns `arg` instead
+
+  **Examples**
+
+  ```clojure
+  (over-> (inc 0) (?fn? 2 3))
+
+  :=> 1
+
+  (-> 1 inc inc (over-> (println 2 1)) inc)
+  > 3 2 1
+  :=> 4
+
+  (-> 1 inc (over-> (-> inc inc (?fn-recording? 2 1))) inc)
+  > 4 2 1
+  :=> 3
+  ```"
+  [arg form]
+  (if form
+    (if (seq? form)
+      (-seq-over-> arg form)
+      (-form-over-> arg form))))
+
+(defmacro over->>
+  "Takes an argument `arg` and a `form`, executes a form with arg as first argument and then ignores form result,
+  and returns `arg` instead
+
+  **Examples**
+
+  ```clojure
+
+  ```"
+  [arg form]
+  (if form
+    (if (seq? form)
+      (-seq-over->> form arg)
+      (-form-over->> form arg))))
+
+(defmacro <-over
+  "Takes an argument `arg` and a `form`, executes a form with arg as last argument and then ignores form result,
+  and returns `arg` instead
+
+  **Examples**
+
+  ```clojure
+  (<-over (println 2 3) 1)
+  > 1 2 3
+  :=> 1
+
+  (->> 1 inc (<-over (-> inc inc (println 2 1))) inc)
+  > 3 2 1
+  :=> 4
+
+  (-> 1
+      inc
+      (over-> (->> inc
+                   (println 1 2)))
+      (over-> println))
+  > 1 2 3
+  > 2
+  :=> 2
+  ```"
+  [form arg]
+  (if form
+    (if (seq? form)
+      (-seq-over-> arg form)
+      (-form-over-> arg form))))
+
+(defmacro <<-over
+  [form arg]
+  (if form
+    (if (seq? form)
+      (-seq-over->> form arg)
+      (-form-over->> form arg))))
+
 (defmacro |>
   "Same as `->`, but if stumbles across any macro marked as :before-thread? - then firstly executes its form and
   then threads
@@ -692,6 +806,21 @@
               (assoc acc (keyword x) x))) {} keys))
 
 (defmacro cond-map
+  "Same as cond, but takes a map as input
+
+  **Examples**
+
+  ```clojure
+  (cond-map {(test? a)        (action a)
+             (another-test a) (action b)
+             :else            (action c)})
+
+  ;; is equal to
+
+  (cond (test? a) (action a)
+        (another-test a) (action b)
+        :else (action c))
+  ```"
   [col]
   (reduce (fn [acc x] (-> acc (add->>seq (key x)) (add->>seq (val x))))
           (list 'cond)
@@ -981,17 +1110,3 @@
   ```"
   [f & args]
   (apply f args))
-
-(defn over
-  "Overthrows arguments applying f to args"
-  [f & args]
-  (apply f args)
-  args)
-
-(defn- -pretty-str
-  [val indentation]
-  (<| val pprint/pprint
-      (pprint/with-pprint-dispatch pprint/code-dispatch)
-      with-out-str
-      str/trim-newline
-      (<<-> (str/replace #"\n" (str "\n" (apply str (repeat indentation "\t")))))))

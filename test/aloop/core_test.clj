@@ -3,13 +3,18 @@
   (:require [aloop.core :refer [if- if-> if-|> if->> if-<| if+ if+> if+|> if+>> if+<|
                                 with-> with-|> with->> with-<|
                                 |-| |-> |->> <-| <<-| <-> <->> <<-> <<->>
+                                over-> over->> <-over <<-over
                                 |> <|
                                 sneak
+                                ->map cond-map
                                 rotate add->>seq add->seq replace->>seq replace->seq swap
-                                mix over switch-> switch->> <-switch <<-switch]]
+                                mix switch-> switch->> <-switch <<-switch]]
             [clojure.string :as str]))
+(def ^:dynamic *invocation-args* [])
 
 (defn ?fn? [& args] args)
+
+(defn ?fn-recording? [& args] (alter-var-root #'*invocation-args* (fn [_] args)))
 
 (deftest if--test
   (is (= (if- (keyword? 'bar)
@@ -391,10 +396,6 @@
              ((mix 0 1 ?fn? 1 2 3) 4 5)
              [2 1 3 4 5]))
 
-(deftest over-test
-  (is (= (over ?fn? 1 2 3 4)
-         [1 2 3 4])))
-
 (deftest sneak-test
   (let [s (with-out-str (sneak (-> 0 inc inc inc)))]
     (is (str/includes? s "file\t: [aloop/core_test.clj:"))
@@ -417,5 +418,40 @@
   (is (= (<<-switch ?fn? :arg1 :arg2 :arg3)
          (?fn? :arg1 :arg2 :arg3))))
 
-(time (add->seq (range 5) 1))
-(time (cons 1 [2 3 4]))
+(deftest over->-test
+  (is (= (over-> :arg1 (?fn-recording? :arg2 :arg3))
+         :arg1))
+  (is (= *invocation-args*
+         [:arg1 :arg2 :arg3]))
+  (is (= (-> 1 inc (over-> (-> inc inc (?fn-recording? 2 1))) inc)
+         3))
+  (is (= *invocation-args*
+         [4 2 1])))
+
+(deftest over->>-test
+  (is (= (over->> :arg1 (?fn-recording? :arg2 :arg3))
+         :arg1))
+  (is (= *invocation-args*
+         [:arg2 :arg3 :arg1])))
+
+(deftest <-over-test
+  (is (= (<-over (?fn-recording? :arg2 :arg3) :arg1)
+         :arg1))
+  (is (= *invocation-args*
+         [:arg1 :arg2 :arg3]))
+  (is (= (->> 1 inc (<-over (-> inc inc (?fn-recording? 2 1))) inc)
+         3))
+  (is (= *invocation-args*
+         [4 2 1])))
+
+(deftest <<-over-test
+  (is (= (<<-over (?fn-recording? :arg2 :arg3) :arg1)
+         :arg1))
+  (is (= *invocation-args*
+         [:arg2 :arg3 :arg1])))
+
+(deftest ->map-test
+  (let [a 'a
+        d 'd]
+    (is (= (->map a {:b 'b :c 'c} d)
+           {:a a :b 'b :c 'c :d 'd}))))
