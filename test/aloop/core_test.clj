@@ -1,457 +1,346 @@
 (ns aloop.core-test
   (:require [clojure.test :refer :all])
-  (:require [aloop.core :refer [if- if-> if-|> if->> if-<| if+ if+> if+|> if+>> if+<|
-                                with-> with-|> with->> with-<|
-                                |-| |-> |->> <-| <<-| <-> <->> <<-> <<->>
-                                over-> over->> <-over <<-over
-                                |> <|
-                                sneak
-                                ->map cond-map
-                                rotate add->>seq add->seq replace->>seq replace->seq swap
-                                mix switch-> switch->> <-switch <<-switch]]
+  (:require [aloop.core :refer [if- if-> if->> -if <-if <<-if
+                                if+ if+> if+>> +if <+if <<+if]]
             [clojure.string :as str]))
-(def ^:dynamic *invocation-args* [])
 
-(defn ?fn? [& args] args)
+(def -default {:all-invocations []
+               :last-invocation []})
 
-(defn ?fn-recording? [& args] (alter-var-root #'*invocation-args* (fn [_] args)))
+(defn true-fn [] true)
+(defn false-fn [] false)
+
+(def fn-invocation-spy
+  (atom -default))
+
+(defn exec&return-first
+  [ret _]
+  ret)
+
+(defn exec&return-last
+  [_ ret]
+  ret)
+
+(defn ?fn?
+  ([arg]
+   (swap! fn-invocation-spy
+          (fn [old new]
+            {:all-invocations (conj (:all-invocations old) new)
+             :last-invocation new})
+          arg)
+   arg)
+  ([arg & args]
+   (swap! fn-invocation-spy
+          (fn [old new]
+            {:all-invocations (conj (:all-invocations old) new)
+             :last-invocation new})
+          (cons arg args))
+   (cons arg args)))
+
+(defn ?clear?
+  []
+  (reset! fn-invocation-spy -default))
+
+(defn clear-fixture
+  [f]
+  (?clear?)
+  (f))
+
+(use-fixtures :each clear-fixture)
 
 (deftest if--test
-  (is (= (if- (keyword? 'bar)
-              :foo)
-         :foo))
-  (is (= (if- (keyword? :bar)
-              :foo)
-         :bar)))
+  (testing "If- behaves as if in terms of args"
+    (is (nil? (if-)))
+    (is (nil? (if- (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (if- nil)))
+    (is (nil? (if- 1))))
+  (testing "First argument of predicate is returned if predicate is true, otherwise - else is executed in do block"
+    (testing "Do block"
+      (is (= :else (if- (keyword? 'i-am-not-a-keyword) :else)))
+      (is (true? (if- (keyword? 'i-am-not-a-keyword) :else (true-fn)))))
+    (is (= :arg (if- (keyword? :arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (= :else (if- (exec&return-first false (?fn? :ret)) :else)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (= true (if- (exec&return-first (?fn? true) 'ignore) :else)))
+      (is (= true (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (= :else (if- (false-fn) :else)))
+    (is (nil? (if- (true-fn) :else)))
+    (is (= :else (if- false :else)))
+    (is (nil? (if- true :else)))))
 
 (deftest if->-test
-  (is (= (if-> (keyword? 'bar)
-               name
-               clojure.string/upper-case
-               keyword)
-         :BAR))
-  (is (= (if-> (keyword? :bar)
-               name
-               clojure.string/upper-case
-               keyword)
-         :bar))
-  (is (= (if-> (keyword? 'bar))
-         'bar))
-  (is (= (if-> (keyword? :bar))
-         :bar)))
-
-(deftest if-|>-test
-  (is (= (if-|> (keyword? 'bar)
-                name
-                clojure.string/upper-case
-                keyword)
-         :BAR))
-  (is (= (if-|> (keyword? :bar)
-                name
-                clojure.string/upper-case
-                keyword)
-         :bar))
-  (is (= (if-|> (keyword? 'bar))
-         'bar))
-  (is (= (if-|> (keyword? :bar))
-         :bar))
-  (is (= (if-|> (keyword? 'bar)
-                name
-                clojure.string/upper-case
-                keyword
-                (<-> (?fn? :1 :2 :3 :4)))
-         [:1 :BAR :2 :3 :4])))
+  (testing "If-> behaves as if in terms of args"
+    (is (nil? (if->)))
+    (is (nil? (if-> (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (if-> nil)))
+    (is (nil? (if-> 1))))
+  (testing "First argument of predicate is returned if predicate is true, otherwise - 'threads first' else on this"
+    (testing "Threading"
+      (is (= :i-am-not-a-keyword (if-> (keyword? 'i-am-not-a-keyword) keyword)))
+      (is (= :i-am-a-keyword (if-> (keyword? 'i-am-not-a-keyword) name (str/replace #"-not" "") keyword))))
+    (is (= :arg (if-> (keyword? :arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (true? (if-> (exec&return-first false (?fn? :ret)) false?)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (= true (if-> (exec&return-first (?fn? true) 'ignore) :else)))
+      (is (= true (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (true? (if-> (false-fn) nil?)))
+    (is (nil? (if-> (true-fn) nil?)))
+    (is (true? (if-> false nil?)))
+    (is (nil? (if-> true nil?)))))
 
 (deftest if->>-test
-  (is (= (if->> (keyword? 'bar)
-                name
-                (clojure.string/replace "abc" #"c")
-                keyword)
-         :abbar))
-  (is (= (if->> (keyword? :bar)
-                name
-                (clojure.string/replace "abc" #"c")
-                keyword)
-         :bar))
-  (is (= (if->> (keyword? 'bar))
-         'bar))
-  (is (= (if->> (keyword? :bar))
-         :bar)))
+  (testing "If->> behaves as if in terms of args"
+    (is (nil? (if->>)))
+    (is (nil? (if->> (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (if->> nil)))
+    (is (nil? (if->> 1))))
+  (testing "First argument of predicate is returned if predicate is true, otherwise - 'threads last' else on this"
+    (testing "Threading"
+      (is (= :i-am-not-a-keyword (if->> (keyword? 'i-am-not-a-keyword) keyword)))
+      (is (= :i-am-truly-keyword (if->> (keyword? 'truly) name (str/replace "i-am-not-a-keyword" #"not-a") keyword))))
+    (is (= :arg (if->> (keyword? :arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (true? (if->> (exec&return-first false (?fn? :ret)) false?)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (= true (if->> (exec&return-first (?fn? true) 'ignore) :else)))
+      (is (= true (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (true? (if->> (false-fn) nil?)))
+    (is (nil? (if->> (true-fn) nil?)))
+    (is (true? (if->> false nil?)))
+    (is (nil? (if->> true nil?)))))
 
-(deftest if-<|-test
-  (is (= (if-<| (keyword? :bar)
-                name
-                (clojure.string/replace "abc" #"c")
-                keyword)
-         :bar))
-  (is (= (if-<| (symbol? :bar)
-                name
-                (clojure.string/replace "abc" #"c")
-                keyword)
-         :abbar))
-  (is (= (if-<| (keyword? 'bar))
-         'bar))
-  (is (= (if-<| (keyword? :bar))
-         :bar))
-  (is (= (if-<| (keyword? 'bar)
-                name
-                clojure.string/upper-case
-                keyword
-                (<->> (?fn? :1 :2 :3 :4)))
-         [:1 :2 :3 :BAR :4])))
+(deftest -if-test
+  (testing "-If behaves as if in terms of args"
+    (is (nil? (-if)))
+    (is (nil? (-if (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (-if nil)))
+    (is (nil? (-if 1))))
+  (testing "Last argument of predicate is returned if predicate is true, otherwise - else is executed in do block"
+    (testing "Do block"
+      (is (= :else (-if (keyword? 'i-am-not-a-keyword) :else)))
+      (is (true? (-if (keyword? 'i-am-not-a-keyword) :else (true-fn)))))
+    (testing "Last arg"
+      (is (= "c" (-if (str/ends-with? "abc" "c") :else))))
+    (is (= :arg (-if (keyword? :arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (= :else (-if (exec&return-last (?fn? :ret) false) :else)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (= true (-if (exec&return-last 'ignore (?fn? true)) :else)))
+      (is (= true (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (= :else (-if (false-fn) :else)))
+    (is (nil? (-if (true-fn) :else)))
+    (is (= :else (-if false :else)))
+    (is (nil? (-if true :else)))))
+
+(deftest <-if-test
+  (testing "<-if behaves as if in terms of args"
+    (is (nil? (<-if)))
+    (is (nil? (<-if (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (<-if nil)))
+    (is (nil? (<-if 1))))
+  (testing "Last argument of predicate is returned if predicate is true, otherwise - 'threads first' else on this"
+    (testing "Threading"
+      (is (= :i-am-not-a-keyword (<-if (keyword? 'i-am-not-a-keyword) keyword)))
+      (is (= :i-am-a-keyword (<-if (keyword? 'i-am-not-a-keyword) name (str/replace #"-not" "") keyword))))
+    (testing "Last arg"
+      (is (= "c" (<-if (str/ends-with? "abc" "c") :else))))
+    (is (= :arg (<-if (keyword? :arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (true? (<-if (exec&return-last (?fn? :ret) false) false?)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (= true (<-if (exec&return-last 'ignore (?fn? true)) :else)))
+      (is (= true (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (true? (<-if (false-fn) nil?)))
+    (is (nil? (<-if (true-fn) nil?)))
+    (is (true? (<-if false nil?)))
+    (is (nil? (<-if true nil?)))))
+
+(deftest <<-if-test
+  (testing "<<-if behaves as if in terms of args"
+    (is (nil? (<<-if)))
+    (is (nil? (<<-if (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (<<-if nil)))
+    (is (nil? (<<-if 1))))
+  (testing "Last argument of predicate is returned if predicate is true, otherwise - 'threads first' else on this"
+    (testing "Threading"
+      (is (= :i-am-not-a-keyword (<<-if (keyword? 'i-am-not-a-keyword) keyword)))
+      (is (= :i-am-truly-keyword (<<-if (keyword? 'truly) name (str/replace "i-am-not-a-keyword" #"not-a") keyword))))
+    (testing "Last arg"
+      (is (= "c" (<-if (str/ends-with? "abc" "c") :else))))
+    (is (= :arg (<<-if (keyword? :arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (true? (<<-if (exec&return-last (?fn? :ret) false) false?)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (= true (<<-if (exec&return-last 'ignore (?fn? true)) :else)))
+      (is (= true (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (true? (<<-if (false-fn) nil?)))
+    (is (nil? (<<-if (true-fn) nil?)))
+    (is (true? (<<-if false nil?)))
+    (is (nil? (<<-if true nil?)))))
 
 (deftest if+-test
-  (is (= (if+ (keyword? :bar)
-              :foo)
-         :foo))
-  (is (= (if+ (keyword? 'bar)
-              :foo)
-         'bar)))
+  (testing "If+ behaves as if in terms of args"
+    (is (nil? (if+)))
+    (is (nil? (if+ (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (if+ nil)))
+    (is (nil? (if+ 1))))
+  (testing "First argument of predicate is returned if predicate is true, otherwise - then is executed in do block"
+    (testing "Do block"
+      (is (= :else (if+ (keyword? :i-am-not-a-keyword) :else)))
+      (is (true? (if+ (keyword? :i-am-not-a-keyword) :else (true-fn)))))
+    (is (= 'arg (if+ (keyword? 'arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (= :else (if+ (exec&return-first true (?fn? :ret)) :else)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (false? (if+ (exec&return-first (?fn? false) 'ignore) :else)))
+      (is (false? (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (nil? (if+ (false-fn) :else)))
+    (is (= :else (if+ (true-fn) :else)))
+    (is (nil? (if+ false :else)))
+    (is (= :else (if+ true :else)))))
 
 (deftest if+>-test
-  (is (= (if+> (keyword? :bar)
-               name
-               clojure.string/upper-case
-               keyword)
-         :BAR))
-  (is (= (if+> (keyword? 'bar)
-               name
-               clojure.string/upper-case
-               symbol)
-         'bar)))
-
-(deftest if+|>-test
-  (is (= (if+|> (keyword? :bar)
-                name
-                clojure.string/upper-case
-                keyword)
-         :BAR))
-  (is (= (if+|> (keyword? 'bar)
-                name
-                clojure.string/upper-case
-                keyword)
-         'bar))
-  (is (= (if+|> (keyword? 'bar))
-         'bar))
-  (is (= (if+|> (keyword? :bar))
-         :bar))
-  (is (= (if+|> (keyword? :bar)
-                name
-                clojure.string/upper-case
-                keyword
-                (<-> (?fn? :1 :2 :3 :4)))
-         [:1 :BAR :2 :3 :4])))
+  (testing "If+> behaves as if in terms of args"
+    (is (nil? (if+>)))
+    (is (nil? (if+> (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (if+> nil)))
+    (is (nil? (if+> 1))))
+  (testing "First argument of predicate is returned if predicate is true, otherwise - then is executed in do block"
+    (testing "Threading"
+      (is (= "i-am-not-a-keyword" (if+> (keyword? :i-am-not-a-keyword) name)))
+      (is (= :i-am-a-keyword (if+> (keyword? :i-am-not-a-keyword) name (str/replace #"-not" "") keyword))))
+    (is (= 'arg (if+> (keyword? 'arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (true? (if+> (exec&return-first true (?fn? :ret)) true?)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (false? (if+> (exec&return-first (?fn? false) 'ignore) :else)))
+      (is (false? (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (nil? (if+> (false-fn) :else)))
+    (is (true? (if+> (true-fn) nil?)))
+    (is (nil? (if+> false :else)))
+    (is (true? (if+> true nil?)))))
 
 (deftest if+>>-test
-  (is (= (if+>> (keyword? :bar)
-                name
-                (clojure.string/replace "abc" #"c")
-                keyword)
-         :abbar))
-  (is (= (if+>> (keyword? 'bar)
-                name
-                (clojure.string/replace "abc" #"c")
-                keyword)
-         'bar))
-  (is (= (if+>> (keyword? 'bar))
-         'bar))
-  (is (= (if+>> (keyword :bar))
-         :bar)))
+  (testing "If+>> behaves as if in terms of args"
+    (is (nil? (if+>>)))
+    (is (nil? (if+>> (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (if+>> nil)))
+    (is (nil? (if+>> 1))))
+  (testing "First argument of predicate is returned if predicate is true, otherwise - then is executed in do block"
+    (testing "Threading"
+      (is (= "i-am-not-a-keyword" (if+>> (keyword? :i-am-not-a-keyword) name)))
+      (is (= :i-am-truly-keyword (if+>> (keyword? :truly) name (str/replace "i-am-not-a-keyword" #"not-a") keyword))))
+    (is (= 'arg (if+>> (keyword? 'arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (true? (if+>> (exec&return-first true (?fn? :ret)) true?)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (false? (if+>> (exec&return-first (?fn? false) 'ignore) :else)))
+      (is (false? (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (nil? (if+>> (false-fn) :else)))
+    (is (true? (if+>> (true-fn) nil?)))
+    (is (nil? (if+>> false :else)))
+    (is (true? (if+>> true nil?)))))
 
-(deftest if+<|-test
-  (is (= (if+<| (keyword? :bar)
-                name
-                (clojure.string/replace "abc" #"c")
-                keyword)
-         :abbar))
-  (is (= (if+<| (keyword? 'bar)
-                name
-                (clojure.string/replace "abc" #"c")
-                keyword)
-         'bar))
-  (is (= (if+<| (keyword :bar)
-                (<->> (?fn? :1 :2 :3 :4)))
-         [:1 :2 :3 :bar :4])))
+(deftest +if-test
+  (testing "+If behaves as if in terms of args"
+    (is (nil? (+if)))
+    (is (nil? (+if (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (+if nil)))
+    (is (nil? (+if 1))))
+  (testing "First argument of predicate is returned if predicate is true, otherwise - then is executed in do block"
+    (testing "Do block"
+      (is (= :else (+if (keyword? :i-am-not-a-keyword) :else)))
+      (is (true? (+if (keyword? :i-am-not-a-keyword) :else (true-fn)))))
+    (is (= 'arg (+if (keyword? 'arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (= :else (+if (exec&return-first true (?fn? :ret)) :else)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (false? (+if (exec&return-first 'ignore (?fn? false)) :else)))
+      (is (false? (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (nil? (+if (false-fn) :else)))
+    (is (= :else (+if (true-fn) :else)))
+    (is (nil? (+if false :else)))
+    (is (= :else (+if true :else)))))
 
-(deftest with->-test
-  (is (= (with-> 0
-                 inc
-                 ?fn?
-                 inc
-                 (?fn? 1))
-         [0 1])))
+(deftest <+if-test
+  (testing "<+If behaves as if in terms of args"
+    (is (nil? (<+if)))
+    (is (nil? (<+if (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (<+if nil)))
+    (is (nil? (<+if 1))))
+  (testing "First argument of predicate is returned if predicate is true, otherwise - then is executed in do block"
+    (testing "Threading"
+      (is (= "i-am-not-a-keyword" (<+if (keyword? :i-am-not-a-keyword) name)))
+      (is (= :i-am-a-keyword (<+if (keyword? :i-am-not-a-keyword) name (str/replace #"-not" "") keyword))))
+    (is (= 'arg (<+if (keyword? 'arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (true? (<+if (exec&return-first (?fn? :ret) true) true?)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (false? (<+if (exec&return-first 'ignore (?fn? false)) :else)))
+      (is (false? (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (nil? (<+if (false-fn) :else)))
+    (is (true? (<+if (true-fn) nil?)))
+    (is (nil? (<+if false :else)))
+    (is (true? (<+if true nil?)))))
 
-(deftest with-|>-test
-  (is (= (with-|> 0
-                  inc
-                  (<-> (?fn? 1 2 3)))
-         [1 0 2 3])))
+(deftest <<+if-test
+  (testing "<<+If behaves as if in terms of args"
+    (is (nil? (<<+if)))
+    (is (nil? (<<+if (keyword? 'i-am-not-a-keyword))))
+    (is (nil? (<<+if nil)))
+    (is (nil? (<<+if 1))))
+  (testing "First argument of predicate is returned if predicate is true, otherwise - then is executed in do block"
+    (testing "Threading"
+      (is (= "i-am-not-a-keyword" (<<+if (keyword? :i-am-not-a-keyword) name)))
+      (is (= :i-am-truly-keyword (<<+if (keyword? :truly) name (str/replace "i-am-not-a-keyword" #"not-a") keyword))))
+    (is (= 'arg (<<+if (keyword? 'arg) (?fn? :fail))))
+    (is (empty? (:last-invocation @fn-invocation-spy)))
+    (is (true? (<<+if (exec&return-first (?fn? :ret) true) true?)))
+    (is (= :ret (:last-invocation @fn-invocation-spy)))
+    (testing "Predicate arg executed only once"
+      (?clear?)
+      (is (false? (<<+if (exec&return-first 'ignore (?fn? false)) :else)))
+      (is (false? (:last-invocation @fn-invocation-spy)))))
+  (testing "Empty predicate and no arg predicate"
+    (is (nil? (<<+if (false-fn) :else)))
+    (is (true? (<<+if (true-fn) nil?)))
+    (is (nil? (<<+if false :else)))
+    (is (true? (<<+if true nil?)))))
 
-(deftest with->>-test
-  (is (= (with->> 0
-                  inc
-                  ?fn?
-                  inc
-                  (?fn? 1))
-         [1 0])))
-
-(deftest with-<|-test
-  (is (= (with-<| 0
-                  inc
-                  (<->> (?fn? 1 2 3)))
-         [1 2 0 3])))
-
-(deftest |-|-test
-  (are [x y] (= x y)
-             (|-| 0 0 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (|-| 0 1 (?fn? :1 :2 :3 :4 :5)) [:2 :1 :3 :4 :5]
-             (|-| 0 2 (?fn? :1 :2 :3 :4 :5)) [:3 :2 :1 :4 :5]
-             (|-| 0 3 (?fn? :1 :2 :3 :4 :5)) [:4 :2 :3 :1 :5]
-             (|-| 0 4 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (|-| 0 5 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (|-| 0 6 (?fn? :1 :2 :3 :4 :5)) [:2 :1 :3 :4 :5]
-             (|-| 0 -1 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (|-| 0 -2 (?fn? :1 :2 :3 :4 :5)) [:4 :2 :3 :1 :5]
-             (|-| 0 -3 (?fn? :1 :2 :3 :4 :5)) [:3 :2 :1 :4 :5]
-             (|-| 0 -4 (?fn? :1 :2 :3 :4 :5)) [:2 :1 :3 :4 :5]
-             (|-| 0 -5 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (|-| 0 -6 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (|-| 0 -7 (?fn? :1 :2 :3 :4 :5)) [:4 :2 :3 :1 :5]
-             (|-| -2 -88 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :4 :3 :5]
-             (|-| 99 -102 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :5 :4]
-             (|-| -3728 78372 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (|-| -1000000 8383 (?fn? :1 :2 :3 :4 :5)) [:4 :2 :3 :1 :5]))
-
-(deftest |->-test
-  (are [x y] (= x y)
-             (|-> 0 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (|-> 1 (?fn? :1 :2 :3 :4 :5)) [:2 :1 :3 :4 :5]
-             (|-> 2 (?fn? :1 :2 :3 :4 :5)) [:3 :2 :1 :4 :5]
-             (|-> 3 (?fn? :1 :2 :3 :4 :5)) [:4 :2 :3 :1 :5]
-             (|-> 4 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (|-> 5 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (|-> 6 (?fn? :1 :2 :3 :4 :5)) [:2 :1 :3 :4 :5]
-             (|-> -1 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (|-> -2 (?fn? :1 :2 :3 :4 :5)) [:4 :2 :3 :1 :5]
-             (|-> -3 (?fn? :1 :2 :3 :4 :5)) [:3 :2 :1 :4 :5]
-             (|-> -4 (?fn? :1 :2 :3 :4 :5)) [:2 :1 :3 :4 :5]
-             (|-> -5 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (|-> -6 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (|-> -7 (?fn? :1 :2 :3 :4 :5)) [:4 :2 :3 :1 :5]))
-
-(deftest |->>-test
-  (are [x y] (= x y)
-             (|->> 0 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (|->> 1 (?fn? :1 :2 :3 :4 :5)) [:1 :5 :3 :4 :2]
-             (|->> 2 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :5 :4 :3]
-             (|->> 3 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :5 :4]
-             (|->> 4 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (|->> 5 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (|->> 6 (?fn? :1 :2 :3 :4 :5)) [:1 :5 :3 :4 :2]
-             (|->> -1 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (|->> -2 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :5 :4]
-             (|->> -3 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :5 :4 :3]
-             (|->> -4 (?fn? :1 :2 :3 :4 :5)) [:1 :5 :3 :4 :2]
-             (|->> -5 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (|->> -6 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (|->> -7 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :5 :4]))
-
-(deftest <-|-test
-  (are [x y] (= x y)
-             (<-| 0 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (<-| 1 (?fn? :1 :2 :3 :4 :5)) [:4 :2 :3 :1 :5]
-             (<-| 2 (?fn? :1 :2 :3 :4 :5)) [:3 :2 :1 :4 :5]
-             (<-| 3 (?fn? :1 :2 :3 :4 :5)) [:2 :1 :3 :4 :5]
-             (<-| 4 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (<-| 5 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (<-| 6 (?fn? :1 :2 :3 :4 :5)) [:4 :2 :3 :1 :5]
-             (<-| -1 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (<-| -2 (?fn? :1 :2 :3 :4 :5)) [:2 :1 :3 :4 :5]
-             (<-| -3 (?fn? :1 :2 :3 :4 :5)) [:3 :2 :1 :4 :5]
-             (<-| -4 (?fn? :1 :2 :3 :4 :5)) [:4 :2 :3 :1 :5]
-             (<-| -5 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (<-| -6 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (<-| -7 (?fn? :1 :2 :3 :4 :5)) [:2 :1 :3 :4 :5]))
-
-(deftest <<-|-test
-  (are [x y] (= x y)
-             (<<-| 0 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (<<-| 1 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :5 :4]
-             (<<-| 2 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :5 :4 :3]
-             (<<-| 3 (?fn? :1 :2 :3 :4 :5)) [:1 :5 :3 :4 :2]
-             (<<-| 4 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (<<-| 5 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (<<-| 6 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :5 :4]
-             (<<-| -1 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (<<-| -2 (?fn? :1 :2 :3 :4 :5)) [:1 :5 :3 :4 :2]
-             (<<-| -3 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :5 :4 :3]
-             (<<-| -4 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :5 :4]
-             (<<-| -5 (?fn? :1 :2 :3 :4 :5)) [:1 :2 :3 :4 :5]
-             (<<-| -6 (?fn? :1 :2 :3 :4 :5)) [:5 :2 :3 :4 :1]
-             (<<-| -7 (?fn? :1 :2 :3 :4 :5)) [:1 :5 :3 :4 :2]))
-
-(deftest <->-test
-  (is (= (<-> (?fn? :1 :2 :3 :4 :5))
-         [:2 :1 :3 :4 :5]))
-  (is (= (<-> (?fn? :1))
-         [:1]))
-  (is (= (<-> (?fn?))
-         nil)))
-
-(deftest <->>-test
-  (is (= (<->> (?fn? :1 :2 :3 :4 :5))
-         [:1 :2 :3 :5 :4]))
-  (is (= (<->> (?fn? :1))
-         [:1]))
-  (is (= (<->> (?fn?))
-         nil)))
-
-(deftest <<->>-test
-  (is (= (<<->> (?fn? :1 :2 :3 :4 :5))
-         [:5 :2 :3 :4 :1]))
-  (is (= (<<->> (?fn? :1))
-         [:1]))
-  (is (= (<<->> (?fn?))
-         nil)))
-
-(deftest <<->-test
-  (is (= (<<-> (?fn? :1 :2 :3 :4 :5))
-         [:2 :1 :3 :4 :5]))
-  (is (= (<<-> (?fn? :1))
-         [:1]))
-  (is (= (<<-> (?fn?))
-         nil)))
-
-(deftest |>-test
-  (is (= (|> 0
-             inc
-             inc
-             str
-             keyword
-             (<-> (?fn? :1 :3 :4 :5)))
-         [:1 :2 :3 :4 :5])))
-
-(deftest <|-test
-  (is (= (<| 5
-             dec
-             str
-             keyword
-             (<->> (?fn? :1 :2 :3 :5)))
-         [:1 :2 :3 :4 :5])))
-
-(deftest rotate-test
-  (are [x y] (= x y)
-             (rotate 3 0) 0
-             (rotate 3 1) 1
-             (rotate 3 2) 2
-             (rotate 3 3) 0
-             (rotate 3 4) 1
-             (rotate 3 -1) 2
-             (rotate 3 -2) 1
-             (rotate 3 -3) 0
-             (rotate 3 -4) 2))
-
-(deftest add->>seq-test
-  (are [x y] (= x y)
-             ((add->>seq 5) '(1 2 3 4)) '(1 2 3 4 5)
-             (add->>seq '(1 2 3 4) 5) '(1 2 3 4 5)
-             (add->>seq '(1 2 3 4) 5 0) '(1 2 3 4 5)
-             (add->>seq '(1 2 3 4) 5 1) '(1 2 3 5 4)
-             (add->>seq '(1 2 3 4) 5 -1) '(5 1 2 3 4)))
-
-(deftest add->seq-test
-  (are [x y] (= x y)
-             (add->seq [1 2 3 4] 5) [5 1 2 3 4]
-             ((add->seq 5) '(1 2 3 4)) '(5 1 2 3 4)
-             (add->seq '(1 2 3 4) 5) '(5 1 2 3 4)
-             (add->seq '(1 2 3 4) 5 3) '(1 2 3 5 4)
-             (add->seq '(1 2 3 4) 5 0) '(5 1 2 3 4)
-             (add->seq '(1 2 3 4) 5 -1) '(1 2 3 4 5)))
-
-(deftest replace->>seq-test
-  (are [x y] (= x y)
-             ((replace->>seq 4) '(1 2 3)) '(1 2 4)
-             (replace->>seq '(1 2 3) 4) '(1 2 4)
-             (replace->>seq '(1 2 3) 4 0) '(1 2 4)
-             (replace->>seq '(1 2 3) 4 1) '(1 4 3)
-             (replace->>seq '(1 2 3) 4 -1) '(4 2 3)))
-
-(deftest replace->seq-test
-  (are [x y] (= x y)
-             ((replace->seq 4) '(1 2 3)) '(4 2 3)
-             (replace->seq '(1 2 3) 4) '(4 2 3)
-             (replace->seq '(1 2 3) 4 0) '(4 2 3)
-             (replace->seq '(1 2 3) 4 -1) '(1 2 4)))
-
-(deftest swap-test
-  (are [x y] (= x y)
-             ((swap 0 3) '(1 2 3 4 5)) '(4 2 3 1 5)
-             (swap '(1 2 3 4 5) 0 0) '(1 2 3 4 5)
-             (swap '(1 2 3 4 5) 0 3) '(4 2 3 1 5)
-             (swap '(1 2 3 4 5) 0 -1) '(5 2 3 4 1)
-             (swap '(1 2 3 4 5) -1 -2) '(1 2 3 5 4)))
-
-(deftest mix-test
-  (are [x y] (= x y)
-             ((mix 0 1 ?fn? 1 2 3) 4 5)
-             [2 1 3 4 5]))
-
-(deftest sneak-test
-  (let [s (with-out-str (sneak (-> 0 inc inc inc)))]
-    (is (str/includes? s "file\t: [aloop/core_test.clj:"))
-    (is (str/includes? s "form\t: (-> 0 inc inc inc)"))
-    (is (str/includes? s "result\t: 3"))))
-
-(deftest switch->-test
-  (is (= (switch-> :arg1 ?fn? :arg2 :arg3)
-         (?fn? :arg1 :arg2 :arg3))))
-
-(deftest swtch->>test
-  (is (= (switch->> :arg3 ?fn? :arg1 :arg2)
-         (?fn? :arg1 :arg2 :arg3))))
-
-(deftest <-swtch-test
-  (is (= (<-switch ?fn? :arg1 :arg2 :arg3)
-         (?fn? :arg3 :arg2 :arg1))))
-
-(deftest <<-swtch-test
-  (is (= (<<-switch ?fn? :arg1 :arg2 :arg3)
-         (?fn? :arg1 :arg2 :arg3))))
-
-(deftest over->-test
-  (is (= (over-> :arg1 (?fn-recording? :arg2 :arg3))
-         :arg1))
-  (is (= *invocation-args*
-         [:arg1 :arg2 :arg3]))
-  (is (= (-> 1 inc (over-> (-> inc inc (?fn-recording? 2 1))) inc)
-         3))
-  (is (= *invocation-args*
-         [4 2 1])))
-
-(deftest over->>-test
-  (is (= (over->> :arg1 (?fn-recording? :arg2 :arg3))
-         :arg1))
-  (is (= *invocation-args*
-         [:arg2 :arg3 :arg1])))
-
-(deftest <-over-test
-  (is (= (<-over (?fn-recording? :arg2 :arg3) :arg1)
-         :arg1))
-  (is (= *invocation-args*
-         [:arg1 :arg2 :arg3]))
-  (is (= (->> 1 inc (<-over (-> inc inc (?fn-recording? 2 1))) inc)
-         3))
-  (is (= *invocation-args*
-         [4 2 1])))
-
-(deftest <<-over-test
-  (is (= (<<-over (?fn-recording? :arg2 :arg3) :arg1)
-         :arg1))
-  (is (= *invocation-args*
-         [:arg2 :arg3 :arg1])))
-
-(deftest ->map-test
-  (let [a 'a
-        d 'd]
-    (is (= (->map a {:b 'b :c 'c} d)
-           {:a a :b 'b :c 'c :d 'd}))))
+(deftest -|
+  )

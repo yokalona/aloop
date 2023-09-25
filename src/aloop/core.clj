@@ -1,302 +1,500 @@
 (ns aloop.core
   (:require [clojure.string :as str]
-            [clojure.pprint :as pprint]))
+            [clojure.pprint :as pprint]
+            [aloop.test :refer [multiple?]]))
 
 (declare
-  ;; Divers set of IFs, usually for singular branch.
-  if- if-> if-|> if->> if-<| if+ if+> if+|> if+>> if+<|
-  ;; Declarative operations for over throwing args
-  with-> with-|> with->> with-<|
-  ;; Function argument order manipulation
-  |-| |-> |->> <-| <<-| <-> <->> <<-> <<->>
-  ;; Threading result ignoring
-  over-> over->> <-over <<-over
-  ;; Threading
-  |> <|
-  ;; Debug examination
-  sneak
-  ;; Usability
-  ->map cond-map
-  ;; Sequential modification
-  rotate add->>seq add->seq replace->>seq replace->seq swap
-  ;; Functions arguments manipulation
-  mix over switch-> switch->> <-switch <<-switch
-  ;; private
-  -pretty-str -natural-> -natural->> -seq-over-> -form-over-> -seq-over->> -form-over->>)
+  ;; One branch if's
+  if- if-> if->> -if <-if <<-if
+  if+ if+> if+>> +if <+if <<+if
+  ;; Sequential execution
+  with-| with-|| with-> with->> |-with ||-with <-with <<-with
 
-;; PRIVATE
+  ;; Sequential modification
+  +rotate -rotate add->>seq add->seq replace->>seq replace->seq swap
+  ;; PRIVATE
+  -universal-if- -natural-> -natural->> -push-over-> -seq-over-> -form-over->)
+
+(defn +rotate
+  [c index]
+  (if (neg? index)
+    (recur c (+ c index))
+    (if (>= index c)
+      (recur c (mod index c))
+      index)))
+
+(defn -rotate
+  [c index]
+  (+rotate c (- (inc index))))
 
 (defn- -pretty-str
   [val indentation]
   (let [a (->> val
-       pprint/pprint
-       (pprint/with-pprint-dispatch pprint/code-dispatch)
-       with-out-str
-       str/trim-newline)]
+               pprint/pprint
+               (pprint/with-pprint-dispatch pprint/code-dispatch)
+               with-out-str
+               str/trim-newline)]
     (str/replace a #"\n" (str "\n" (apply str (repeat indentation "\t"))))))
 
-(defn- -natural->
-  [x form]
-  (with-meta `(~(first form) ~x ~@(next form)) (meta form)))
-
-(defn- -natural->>
-  [x form]
-  (with-meta `(~(first form) ~@(next form) ~x) (meta form)))
-
-(defn- -seq-over->
-  [arg form]
-  `(let [p# ~arg]
-     (~(first form) p# ~@(next form))
-     p#))
-
-(defn- -form-over->
-  [arg form]
-  `(let [p# ~arg]
-     (~form p#)
-     p#))
-
-(defn- -seq-over->>
-  [form arg]
-  `(let [p# ~arg]
-     (~(first form) ~@(next form) p#)
-     p#))
-
-(defn- -form-over->>
-  [form arg]
-  `(let [p# ~arg]
-     (~form p#)
-     p#))
+(defn- -if-
+  [index predicate else f up]
+  (if (multiple? predicate)
+    (let [index (-> predicate next count (+rotate index))
+          invocation (first predicate)
+          predicate (next predicate)]
+      `(let [arg# ~(nth predicate index)]
+         (if (~up (~invocation ~@(take index predicate) arg# ~@(drop (inc index) predicate)))
+           (~f arg# ~@else)
+           arg#)))
+    `(if (~up ~predicate)
+       (~f nil ~@else))))
 
 (defmacro if-
-  "Takes `predicate p` of at least one argument and a list of `forms`.
-  If predicate is true - returns its first argument, otherwise
-  executes `else` forms in the implicit `do`
+  "Takes a `predicate` and a body `else`. If predicate is FALSE executes `else` in explicit do block, otherwise returns
+  predicate's first argument. In case if predicate doesn't have arguments, no `else` or no predicate provided - returns
+  `nil`.
 
   **Examples**
 
   ```clojure
-  (if- (keyword? 'bar)
-    :foo)
+  (if- (keyword? 'i-am-not-a-keyword)
+       :else)
 
-  :=> :foo
+  :=> :else
 
-  (if- (keyword? :bar)
-    :foo)
+  (if- (keyword? :arg)
+       :else)
 
-  :=> :bar
-  ```"
-  [p & else]
-  (if-let [arg (second p)]
-    (list 'if p arg (cons 'do else))))
-
-(defmacro if->
-  "Takes `predicate p` of at least one argument and a list of `forms`.
-  If predicate is true - returns its first argument, otherwise
-  threads `else` forms with `ps first arg`
-
-  **Examples**
-
-  ```clojure
-  (if-> (keyword? 'bar)
-        name
-        clojure.string/upper-case
-        keyword)
-
-  :=> :BAR
-
-  (if-> (keyword? :bar)
-        name
-        clojure.string/upper-case
-        keyword)
-
-  :=> :bar
-
-  ```"
-  [p & else]
-  (if-let [arg (second p)]
-    (list 'if p arg `(-> ~arg ~@else))))
-
-(defmacro if-|>
-  "Same as `if->`, but uses `|>` instead of `->`
-
-  **Examples**
-
-  ```clojure
-  (defn ?fn? [& args] args)
-
-  (if-|> (keyword? 'bar)
-         name
-         clojure.string/upper-case
-         keyword
-         (<-> (?fn? :1 :2 :3 :4)))
-  :=> [:1 :BAR :2 :3 :4]
+  :=> :arg
   ```
 
-  See [[|>]]"
-  [p & else]
-  (if-let [arg (second p)]
-    (list 'if p arg `(|> ~arg ~@else))))
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[do]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & else]
+   (-if- 0 predicate else 'do false?)))
+
+(defmacro if->
+  "Takes a `predicate` and a body `else`. If predicate is FALSE threads `else` with the first argument of a predicate,
+  otherwise returns predicate's first argument. In case if predicate doesn't have arguments - threads on nil. If no
+  `else` or no predicate provided - returns `nil`.
+
+  **Examples**
+
+  ```clojure
+  (if-> (keyword? 'i-am-not-a-keyword)
+        name
+        (str/replace #\"-not\" \"\")
+        keyword)
+
+  :=> :i-am-a-keyword
+
+  (if-> (keyword? :arg)
+        ?fn?)
+
+  :=> :arg
+  ```
+
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[->]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & else]
+   (-if- 0 predicate else '-> false?)))
 
 (defmacro if->>
-  "Takes `predicate p` of at least one argument and a list of `forms`.
-  If predicate is true - returns its first argument, otherwise
-  threads last `else` forms with `ps first arg`
+  "Takes a `predicate` and a body `else`. If predicate is FALSE threads last `else` with the first argument of a
+  predicate, otherwise returns predicate's first argument. In case if predicate doesn't have arguments - threads on nil.
+  If no `else` or no predicate provided - returns `nil`.
 
   **Examples**
 
   ```clojure
-  (if->> (keyword? 'bar)
+  (if->> (keyword? 'truly)
          name
-         (clojure.string/replace \"abc\" #\"c\")
+         (str/replace \"i-am-not-a-keyword\" #\"not-a\")
          keyword)
 
-  :=> :abbar
+  :=> :i-am-truly-keyword
 
-  (if->> (keyword? :bar)
-         name
-         (clojure.string/replace \"abc\" #\"c\")
-         keyword)
+  (if->> (keyword? :arg)
+         ?fn?)
 
-  :=> :bar
-  ```"
-  [p & else]
-  (if-let [arg (second p)]
-    (list 'if p arg `(->> ~arg ~@else))))
+  :=> :arg
+  ```
 
-(defmacro if-<|
-  "Same as `if->>`, but uses `<|` instead of `->>`
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[->]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & else]
+   (-if- 0 predicate else '->> false?)))
+
+(defmacro -if
+  "Takes a `predicate` and a body `else`. If predicate is FALSE executes `else` in explicit do block, otherwise returns
+  predicate's last argument. In case if predicate doesn't have arguments, no `else` or no predicate provided - returns
+  `nil`.
 
   **Examples**
 
   ```clojure
-  (if-<| (keyword? 'bar)
-         name
-         clojure.string/upper-case
-         keyword
-         (<->> (?fn? :1 :2 :3 :4)))
+  (if- (keyword? 'i-am-not-a-keyword)
+       :else)
 
-  :=> [:1 :2 :3 :BAR :4]
-  ```"
-  [p & else]
-  (if-let [arg (second p)]
-    (list 'if p arg `(<| ~arg ~@else))))
+  :=> :else
+
+  (if- (str/ends-with \"\" :arg)
+       :else)
+
+  :=> :arg
+  ```
+
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[do]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & else]
+   (-if- -1 predicate else 'do false?)))
+
+(defmacro <-if
+  "Takes a `predicate` and a body `else`. If predicate is FALSE threads `else` with last argument of a predicate,
+  otherwise returns predicate's last argument. In case if predicate doesn't have arguments - threads on nil.
+
+  **Examples**
+
+  ```clojure
+  (<-if (keyword? 'i-am-not-a-keyword)
+        str
+        str/upper-case))
+
+  :=> \"I-AM-NOT-A-KEYWORD\"
+
+  (<-if (keyword? :arg)
+        ?fn?)
+
+  :=> :arg
+  ```
+
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[->]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & else]
+   (-if- -1 predicate else '-> false?)))
+
+(defmacro <<-if
+  "Takes a `predicate` and a body `else`. If predicate is FALSE threads last `else` with last argument of a predicate,
+  otherwise returns predicate's last argument. In case if predicate doesn't have arguments - threads on nil.
+
+  **Examples**
+
+  ```clojure
+  (<<-if (keyword? 'i-am-not-a-keyword)
+         str
+         str/upper-case))
+
+  :=> \"I-AM-NOT-A-KEYWORD\"
+
+  (<<-if (keyword? :arg)
+        ?fn?)
+
+  :=> :arg
+  ```
+
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[->>]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & else]
+   (-if- -1 predicate else '->> false?)))
 
 (defmacro if+
-  "Takes `predicate p` of at least one argument and a list of `forms`.
-  If predicate is false - returns its first argument, otherwise
-  executes `then` forms in the implicit `do`
+  "Takes a `predicate` and a body `then`. If predicate is TRUE executes `then` in explicit do block, otherwise returns
+  predicate's first argument. In case if predicate doesn't have arguments, no `then` or no predicate provided - returns
+  `nil`.
 
   **Examples**
 
   ```clojure
-  (if+ (keyword? :bar)
-    :foo)
+  (if- (keyword? 'i-am-not-a-keyword)
+       :else)
 
-  :=> :bar
+  :=> :else
 
-  (if+ (keyword? 'bar)
-    :foo)
+  (if- (keyword? :arg)
+       :else)
 
-  :=> :foo
-  ```"
-  [p & then]
-  (if-let [arg (second p)]
-    (list 'if p (if (= 1 (count then))
-                  (first then)
-                  (cons 'do then)) arg)))
+  :=> :arg
+  ```
+
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[do]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & then]
+   (-if- 0 predicate then 'do true?)))
 
 (defmacro if+>
-  "Takes `predicate p` of at least one argument and a list of `forms`.
-  If predicate is false - returns its first argument, otherwise
-  threads `then` forms with `ps first arg`
+  "Takes a `predicate` and a body `then`. If predicate is TRUE threads `then` with the first argument of a predicate,
+  otherwise returns predicate's first argument. In case if predicate doesn't have arguments - threads on nil. If no
+  `then` or no predicate provided - returns `nil`.
 
   **Examples**
 
   ```clojure
-  (if+> (keyword? :bar)
+  (if-> (keyword? 'i-am-not-a-keyword)
         name
-        clojure.string/upper-case
+        (str/replace #\"-not\" \"\")
         keyword)
 
-  :=> :BAR
+  :=> :i-am-a-keyword
 
-  (if+> (keyword? 'bar)
-        name
-        clojure.string/upper-case
-        keyword)
+  (if-> (keyword? :arg)
+        ?fn?)
 
-  :=> 'bar
-  ```"
-  [p & else]
-  (if-let [arg (second p)]
-    (list 'if p `(-> ~arg ~@else) arg)))
+  :=> :arg
+  ```
 
-(defmacro if+|>
-  "Same as `if+>`, but uses `|>` instead of `->`
-
-  **Examples**
-
-  ```clojure
-  (if+|> (keyword? :bar)
-         name
-         clojure.string/upper-case
-         keyword
-         (<-> (?fn? :1 :2 :3 :4)))
-
-  :=> [:1 :BAR :2 :3 :4]
-  ```"
-  [p & else]
-  (if-let [arg (second p)]
-    (list 'if p `(|> ~arg ~@else) arg)))
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[->]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & then]
+   (-if- 0 predicate then '-> true?)))
 
 (defmacro if+>>
-  "Takes `predicate p` of at least one argument and a list of `forms`.
-  If predicate is false - returns its first argument, otherwise
-  threads last `then` forms with `ps first arg`
+  "Takes a `predicate` and a body `then`. If predicate is TRUE threads last `then` with the first argument of a
+  predicate, otherwise returns predicate's first argument. In case if predicate doesn't have arguments - threads on nil.
+  If no `then` or no predicate provided - returns `nil`.
 
   **Examples**
 
   ```clojure
-  (if+>> (keyword? :bar)
+  (if->> (keyword? 'truly)
          name
-         (clojure.string/replace \"abc\" #\"c\")
+         (str/replace \"i-am-not-a-keyword\" #\"not-a\")
          keyword)
 
-  :=> :abbar
+  :=> :i-am-truly-keyword
 
-  (if+>> (keyword? 'bar)
-         name
-         (clojure.string/replace \"abc\" #\"c\")
-         keyword)
-  :=> 'bar
-  ```"
-  [p & else]
-  (if-let [arg (second p)]
-    (list 'if p `(->> ~arg ~@else) arg)))
+  (if->> (keyword? :arg)
+         ?fn?)
 
-(defmacro if+<|
-  "Same as `if+>>`, but uses `<|` instead of `->>`
+  :=> :arg
+  ```
+
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[->]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & then]
+   (-if- 0 predicate then '->> true?)))
+
+(defmacro +if
+  "Takes a `predicate` and a body `then`. If predicate is TRUE executes `then` in explicit do block, otherwise returns
+  predicate's last argument. In case if predicate doesn't have arguments, no `then` or no predicate provided - returns
+  `nil`.
 
   **Examples**
 
   ```clojure
-  (if+<| (keyword? :bar)
-         name
-         (clojure.string/replace \"abc\" #\"c\")
-         keyword)
+  (if- (keyword? 'i-am-not-a-keyword)
+       :else)
 
-  :=> :abbar
+  :=> :else
 
-  (if+<| (keyword? 'bar)
-         name
-         (clojure.string/replace \"abc\" #\"c\")
-         keyword)
+  (if- (str/ends-with \"\" :arg)
+       :else)
 
-  :=> 'bar
+  :=> :arg
+  ```
+
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[do]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & then]
+   (-if- -1 predicate then 'do true?)))
+
+(defmacro <+if
+  "Takes a `predicate` and a body `then`. If predicate is TRUE threads `then` with last argument of a predicate,
+  otherwise returns predicate's last argument. In case if predicate doesn't have arguments - threads on nil.
+
+  **Examples**
+
+  ```clojure
+  (<-if (keyword? 'i-am-not-a-keyword)
+        str
+        str/upper-case))
+
+  :=> \"I-AM-NOT-A-KEYWORD\"
+
+  (<-if (keyword? :arg)
+        ?fn?)
+
+  :=> :arg
+  ```
+
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[->]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & then]
+   (-if- -1 predicate then '-> true?)))
+
+(defmacro <<+if
+  "Takes a `predicate` and a body `then`. If predicate is TRUE threads last `then` with last argument of a predicate,
+  otherwise returns predicate's last argument. In case if predicate doesn't have arguments - threads on nil.
+
+  **Examples**
+
+  ```clojure
+  (<<-if (keyword? 'i-am-not-a-keyword)
+         str
+         str/upper-case))
+
+  :=> \"I-AM-NOT-A-KEYWORD\"
+
+  (<<-if (keyword? :arg)
+        ?fn?)
+
+  :=> :arg
+  ```
+
+  **Note: Side effects in predicate might cause unwonted behavior**
+  See [[->>]]"
+  ([] nil)
+  ([_predicate] nil)
+  ([predicate & then]
+   (-if- -1 predicate then '->> true?)))
+
+(defmacro -|
+  "\"Pushes\" `arg` to the `index` position in form.
+
+  **Example**
+
+  ```clojure
+  (-| 2 2 (/ 8))
+
+  :=> 4
   ```"
-  [p & else]
-  (if-let [arg (second p)]
-    (list 'if p `(<| ~arg ~@else) arg)))
+  [arg index form]
+  (if form
+    (if (coll? form)
+      (-push-over-> arg (+rotate (count form) index) form)
+      `(~form ~arg))))
+
+(defmacro -||
+  [index form arg]
+  `(-| ~arg ~index ~form))
+
+(defmacro |-
+  [arg index form]
+  `(-| ~arg ~(-> form count (-rotate index)) ~form))
+
+(defmacro ||-
+  [index form arg]
+  `(-| ~arg ~(-> form count (-rotate index)) ~form))
+
+(defmacro |-|
+  [l r form]
+  (if form
+    (if (coll? form)
+      (cons (first form)
+            (swap (next form)
+                  (-> form count (+rotate l))
+                  (-> form count (+rotate r)))))))
+
+(defmacro |-||
+  [l r form]
+  `(|-| ~l ~(-> form count (-rotate r)) ~form))
+
+(defmacro ||-|
+  [l r form]
+  `(|-| ~(-> form count (-rotate l)) ~r ~form))
+
+(defmacro ||-||
+  [l r form]
+  `(|-| ~(-> form count (-rotate l)) ~(-> form count (-rotate r)) ~form))
+
+(defmacro |->
+  [index form]
+  `(|-| 0 ~(-> form count (+rotate index)) ~form))
+
+(defmacro |->>
+  [index form]
+  `(|-| -1 ~(-> form count (+rotate index)) ~form))
+
+(defmacro ||->
+  [index form]
+  `(|-| 0 ~(-> form count (-rotate index)) ~form))
+
+(defmacro ||->>
+  [index form]
+  `(|-| -1 ~(-> form count (-rotate index)) ~form))
+
+(defmacro <-|
+  [form index]
+  `(|-> ~index ~form))
+
+(defmacro <<-|
+  [form index]
+  `(|->> ~index ~form))
+
+(defmacro <-||
+  [form index]
+  `(||-> ~index ~form))
+
+(defmacro <<-||
+  [form index]
+  `(||->> ~index ~form))
+
+(defmacro <->>
+  [form]
+  `(|-| 0 -1 ~form))
+
+(defmacro <<->
+  [form]
+  `(<->> ~form))
+
+(defmacro with-|
+  [arg index & forms]
+  (let [index (+rotate (count forms) index)]
+    (loop [d (list 'do), forms forms]
+      (if forms
+        (let [form (first forms)
+              with (if (seq? form)
+                     (-push-over-> arg index form)
+                     (list form arg))]
+          (recur (concat d (list with)) (next forms)))
+        d))))
+
+(defmacro with-||
+  [form & rst]
+  (let [index (nth (+rotate (count rst) -1) rst)
+        arg (last rst)]
+    (if (and index (number? index))
+      (with-| arg index (cons form (drop-last 2 rst))))))
+
+(defmacro |-with
+  [arg index & forms]
+  (let [index (-rotate (count forms) index)]
+    (loop [d (list 'do), forms forms]
+      (if forms
+        (let [form (first forms)
+              with (if (seq? form)
+                     (-push-over-> arg index form)
+                     (list form arg))]
+          (recur (concat d (list with)) (next forms)))
+        d))))
+
+(defmacro ||-with
+    [form & rst]
+    (let [index (nth (-rotate (count rst) -1) rst)
+          arg (last rst)]
+      (if (and index (number? index))
+        (with-| arg index (cons form (drop-last 2 rst))))))
 
 (defmacro with->
   "Takes `x` and a list of `forms` and executes `forms` in implicit `do` providing
@@ -315,39 +513,16 @@
   :=> [0]
   ```"
   [x & forms]
-  (loop [d (list 'do), forms forms]
+  (if (< 1 (count forms))
+    (loop [d (list 'do), forms forms]
     (if forms
       (let [form (first forms)
             with (if (seq? form)
                    (-natural-> x form)
                    (list form x))]
         (recur (concat d (list with)) (next forms)))
-      d)))
-
-(defmacro with-|>
-  "Same as `with->`, but uses `|>` instead of `->`
-
-  **Examples**
-
-  ```clojure
-  (with-|> 0
-           inc
-           (<-> (?fn? 1 2 3)))
-
-  :=> [1 0 2 3]
-  ```"
-  [x & forms]
-  (loop [d (list 'do), forms forms]
-    (if forms
-      (let [form (first forms)
-            with (if (seq? form)
-                   (if `(get-in (meta (var ~(first form))) [::aloop ::before-thread?])
-                     (let [[op form] form]
-                       `(~op ~(-natural-> x form)))
-                     (-natural-> x form))
-                   (list form x))]
-        (recur (concat d (list with)) (next forms)))
-      d)))
+      d))
+    `(~(first forms) ~x)))
 
 (defmacro with->>
   "Takes `x` and a list of `forms` and executes `forms` in implicit `do` providing
@@ -375,404 +550,59 @@
         (recur (concat d (list with)) (next forms)))
       d)))
 
-(defmacro with-<|
-  "Same as `with->>`, but uses `<|` instead of `->>`
-
-  **Examples**
-
-  ```clojure
-  (with-<| 0
-           inc
-           (<->> (?fn? 1 2 3)))
-
-  :=> [1 2 0 3]
-  ```"
-  [x & forms]
-  (loop [d (list 'do), forms forms]
-    (if forms
-      (let [form (first forms)
-            with (if (seq? form)
-                   (if `(get-in (meta (var ~(first form))) [::aloop ::before-thread?])
-                     (let [[op form] form]
-                       `(~op ~(-natural->> x form)))
-                     (-natural->> x form)))]
-        (recur (concat d (list with)) (next forms)))
-      d)))
-
-(defmacro |-|
-  "Takes a `form` and two indices: `l` and `r`. Switch places `lth` arg with `rth` arg of `form` if any. Positively
-  rotates both indices, i.e. counts indices forward, where first element is 0, second is 1 and so on. If index is
-  negative - counts indices negatively, i.e. last element is -1, second to last - -2.
-
-  **Examples**
-
-  ```clojure
-  (|-| 0 0 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :2 :3 :4 :5]
-
-  (|-| 0 -1 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:5 :2 :3 :4 :1]
-
-  (|-| -2 -88 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :2 :4 :3 :5]
-
-  (|-| -1000000 8383 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:4 :2 :3 :1 :5]
-  ```
-
-  See: [[rotate]]"
-  [l r form]
-  {::aloop {::before-thread? true}}
-  (if+ (coll? form)
-       (cons (first form) (swap (next form) l r))))
-
-(defmacro |->
-  "Takes a `form` and index `i`. Switch places for `1st` arg with `ith` arg of `form` if any. Positively rotates index
-  `i`, i.e. counts indices forward, where first element is 0, second is 1 and so on. If index is negative - counts
-  indices negatively, i.e. last element is -1, second to last - -2.
-
-  **Examples**
-
-  ```clojure
-  (|-> 0 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :2 :3 :4 :5]
-
-  (|-> 1 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:2 :1 :3 :4 :5]
-
-  (|-> -1 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:5 :2 :3 :4 :1]
-
-  (|-> -102 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:4 :2 :3 :1 :5]
-  ```
-
-  See: [[rotate]]"
-  {::aloop {::before-thread? true}}
-  [i form]
-  (if+ (coll? form)
-       (cons (first form) (swap (next form) i 0))))
-
-(defmacro |->>
-  "Takes a `form` and index `i`. Switch places for `last` arg with `ith` arg of `form` if any. Positively rotates index
-  `i`, i.e. counts indices forward, where first element is 0, second is 1 and so on. If index is negative - counts
-  indices negatively, i.e. last element is -1, second to last - -2.
-
-  **Examples**
-
-  ```clojure
-  (|->> 0 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:5 :2 :3 :4 :1]
-
-  (|->> 1 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :5 :3 :4 :2]
-
-  (|->> -1 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :2 :3 :4 :5]
-
-  (|->> -4 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :5 :3 :4 :2]
-  ```
-
-  See: [[rotate]]"
-  {::aloop {::before-thread? true}}
-  [i form]
-  (if+ (coll? form)
-       (cons (first form) (swap (next form) i -1))))
-
-(defmacro <-|
-  "Takes a `form` and index `i`. Switch places for `1st` arg with `ith` arg of `form` if any. Negatively rotates index
-  `i`, i.e. counts indices backwards, where last element is 0, second to last is 1 and so on. If index is negative -
-  counts indices positively, i.e. first element is -1, second - -2.
-
-  **Examples**
-
-  ```clojure
-  (<-| 0 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:5 :2 :3 :4 :1]
-
-  (<-| 1 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:4 :2 :3 :1 :5]
-
-  (<-| -1 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :2 :3 :4 :5]
-
-  (<-| -4 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:4 :2 :3 :1 :5]
-  ```
-
-  See: [[rotate]]"
-  {::aloop {::before-thread? true}}
-  [i form]
-  `(|-> ~(- (inc i)) ~form))
-
-(defmacro <<-|
-  "Takes a `form` and index `i`. Switch places for `last` arg with `ith` arg of `form` if any. Negatively rotates index
-  `i`, i.e. counts indices backwards, where last element is 0, second to last is 1 and so on. If index is negative -
-  counts indices positively, i.e. first element is -1, second - -2.
-
-  **Examples**
-
-  ```clojure
-  (<<-| 0 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :2 :3 :4 :5]
-
-  (<<-| 1 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :2 :3 :5 :4]
-
-  (<<-| -1 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:5 :2 :3 :4 :1]
-
-  (<<-| -4 (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :2 :3 :5 :4]
-  ```
-
-  See: [[rotate]]"
-  {::aloop {::before-thread? true}}
-  [i form]
-  `(|->> ~(- (inc i)) ~form))
-
-(defmacro <->
-  "Takes a form of any args and switch places for first and second arg if any
-
-  **Examples**
-
-  ```clojure
-  (<-> (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:2 :1 :3 :4 :5]
-
-  (<-> (?fn? :1))
-
-  :=> [:1]
-
-  (<-> (?fn?))
-
-  :=> nil
-  ```"
-  {::aloop {::before-thread? true}}
-  [form]
-  `(|-| 0 1 ~form))
-
-(defmacro <->>
-  "Take a form of any args and switch places for last and second to last arg if any
-
-  **Examples**
-
-  ```clojure
-  (<->> (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:1 :2 :3 :5 :4]
-
-  (<->> (?fn? :1))
-
-  :=> [:1]
-
-  (<->> (?fn?))
-
-  :=> nil
-  ```"
-  {::aloop {::before-thread? true}}
-  [form]
-  `(|-| -2 -1 ~form))
-
-(defmacro <<->>
-  "Take a form of any args and switch places for first and last arg if any
-
-  **Examples**
-
-  ```clojure
-  (<<->> (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:5 :2 :3 :4 :1]
-
-  (<<->> (?fn? :1))
-
-  :=> [:1]
-
-  (<<->> (?fn?))
-
-  :=> nil
-  ```"
-  {::aloop {::before-thread? true}}
-  [form]
-  `(|-| 0 -1 ~form))
-
-(defmacro <<->
-  "Alias for `<->`
-
-  **Examples**
-
-  ```clojure
-  (<<-> (?fn? :1 :2 :3 :4 :5))
-
-  :=> [:2 :1 :3 :4 :5]
-
-  (<<-> (?fn? :1))
-
-  :=> [:1]
-
-  (<<-> (?fn?))
-
-  :=> nil
-  ```"
-  {::aloop {::before-thread? true}}
-  [form]
-  `(<-> ~form))
+;(defmacro <-with
+;  [form & rst]
+;  (let [arg (last rst)]
+;    (with-> arg (cons form (drop-last rst)))))
+
+;(defmacro <<-with
+;  [form & rst]
+;  (let [arg (last rst)]
+;    (with->> arg (cons form (drop-last rst)))))
+
+(defmacro over-|
+  [arg index form]
+  (if form
+    (if (seq? form)
+      (-seq-over-> arg (-> form count (+rotate index)) form)
+      (-form-over-> arg form))))
+
+(defmacro over-||
+  [index form arg]
+  (if form
+    (if (seq? form)
+      (-seq-over-> arg (-> form count (+rotate index)) form)
+      (-form-over-> arg form))))
+
+(defmacro |-over
+  [arg index form]
+  (if form
+    (if (seq? form)
+      (-seq-over-> arg (-> form count (-rotate index)) form)
+      (-form-over-> arg form))))
+
+(defmacro ||-over
+  [index form arg]
+  (if form
+    (if (seq? form)
+      (-seq-over-> arg (-> form count (-rotate index)) form)
+      (-form-over-> arg form))))
 
 (defmacro over->
-  "Takes an argument `arg` and a `form`, executes a form with arg as first argument and then ignores form result,
-  and returns `arg` instead
-
-  **Examples**
-
-  ```clojure
-  (over-> (inc 0) (?fn? 2 3))
-
-  :=> 1
-
-  (-> 1 inc inc (over-> (println 2 1)) inc)
-  > 3 2 1
-  :=> 4
-
-  (-> 1 inc (over-> (-> inc inc (?fn-recording? 2 1))) inc)
-  > 4 2 1
-  :=> 3
-  ```"
   [arg form]
-  (if form
-    (if (seq? form)
-      (-seq-over-> arg form)
-      (-form-over-> arg form))))
+  `(over-| ~arg 0 ~form))
 
 (defmacro over->>
-  "Takes an argument `arg` and a `form`, executes a form with arg as first argument and then ignores form result,
-  and returns `arg` instead
-
-  **Examples**
-
-  ```clojure
-
-  ```"
-  [arg form]
-  (if form
-    (if (seq? form)
-      (-seq-over->> form arg)
-      (-form-over->> form arg))))
+  [form arg]
+  `(over-| ~arg 0 ~form))
 
 (defmacro <-over
-  "Takes an argument `arg` and a `form`, executes a form with arg as last argument and then ignores form result,
-  and returns `arg` instead
-
-  **Examples**
-
-  ```clojure
-  (<-over (println 2 3) 1)
-  > 1 2 3
-  :=> 1
-
-  (->> 1 inc (<-over (-> inc inc (println 2 1))) inc)
-  > 3 2 1
-  :=> 4
-
-  (-> 1
-      inc
-      (over-> (->> inc
-                   (println 1 2)))
-      (over-> println))
-  > 1 2 3
-  > 2
-  :=> 2
-  ```"
   [form arg]
-  (if form
-    (if (seq? form)
-      (-seq-over-> arg form)
-      (-form-over-> arg form))))
+  `(|-over ~arg 0 ~form))
 
 (defmacro <<-over
   [form arg]
-  (if form
-    (if (seq? form)
-      (-seq-over->> form arg)
-      (-form-over->> form arg))))
-
-(defmacro |>
-  "Same as `->`, but if stumbles across any macro marked as :before-thread? - then firstly executes its form and
-  then threads
-
-  **Examples**
-
-  ```clojure
-  (|> 0
-      inc
-      inc
-      str
-      keyword
-      (<-> (?fn? :1 :3 :4 :5)))
-
-  :=> [:1 :2 :3 :4 :5]
-  ```"
-  [x & forms]
-  (loop [x x, forms forms]
-    (if forms
-      (let [form (first forms)
-            threaded (if (seq? form)
-                       (if (-> form first resolve meta ::aloop ::before-thread? some?)
-                         (let [[op form] form]
-                           `(~op ~(-natural-> x form)))
-                         (-natural-> x form))
-                       (list form x))]
-        (recur threaded (next forms)))
-      x)))
-
-(defmacro <|
-  "Same as `->>`, but if stumbles across any macro marked as :before-thread? - then firstly executes its form and
-  then threads
-
-  **Examples**
-
-  ```clojure
-  (<| 5
-      dec
-      str
-      keyword
-      (<->> (println :1 :2 :3 :5)))
-
-  :=> [:1 :2 :3 :4 :5]
-  ```"
-  [x & forms]
-  (loop [x x, forms forms]
-    (if forms
-      (let [form (first forms)
-            threaded (if (seq? form)
-                       (if (-> form first resolve meta ::aloop ::before-thread? some?)
-                         (let [[op form] form]
-                           `(~op ~(-natural->> x form)))
-                         (-natural->> x form))
-                       (list form x))]
-        (recur threaded (next forms)))
-      x)))
+  `(|-over ~arg 0 ~form))
 
 (defmacro sneak
   "Prints to *out* the result of `form` and `form` itself. Doesn't execute form until later"
@@ -781,7 +611,7 @@
   (let [f (-pretty-str form 3)
         file *file*
         line `~(:line (meta &form))
-        f (if+<| (str/includes? f "\n") (str "\n"))]
+        f (if+>> (str/includes? f "\n") (str "\n"))]
     `(let [result# ~form]
        (println (format "sneak:\n\tfile\t: [%s:%s]\n\tform\t: %s\n\tresult\t: %s" ~file ~line ~f result#))
        result#)))
@@ -825,35 +655,6 @@
   (reduce (fn [acc x] (-> acc (add->>seq (key x)) (add->>seq (val x))))
           (list 'cond)
           col))
-
-(defn rotate
-  "Takes an `index`and right border `c`. Envelops `index` around the length of `c`, if `index` is positive - envelopes
-  clockwise, otherwise - counterclockwise. In other words, uses different approaches for indexing a collection of
-  length c. For positive values of `index` - count a first element of collection as 0, second as 1 and so on.
-  For negative values - last element of collection will be -1, second to last - -2. In other words, provides cyclic
-  indexation for an array of length `c`.
-
-  **Examples**
-
-  | array 'arr'       |  1  |  2  |  3  |  4  |  5  |
-  |-------------------|-----|-----|-----|-----|-----|
-  | positive indexing |  0  |  1  |  2  |  3  |  4  |
-  | positive indexing | -5  | -4  | -3  | -2  | -1  |
-  | negative indexing | -4  | -3  | -2  | -1  |  0  |
-  | negative indexing |  1  |  2  |  3  |  4  |  5  |
-
-  ```clojure
-  (rotate (count arr) 0) :=> 0
-  (rotate (count arr) 3) :=> 3
-  (rotate (count arr) 5) :=> 0
-  (rotate (count arr) 6) :=> 1
-  (rotate (count arr) -1) :=> 4
-  ```"
-  [c index]
-  (if (neg? index)
-    (recur c (+ c index))
-    (if+ (>= index c)
-         (recur c (mod index c)))))
 
 (defn add->>seq
   "Takes an arbitrary collection `where` and an element `what`. Adds `what` to the index `place` in `where`.
@@ -930,7 +731,7 @@
    (add->seq where what 0))
   ([where what place]
    (if+ (sequential? where)
-        (let [place (-> where count inc (rotate place))]
+        (let [place (-> where count inc (+rotate place))]
           (->> where
                (drop place)
                (concat (add->>seq (take place where) what)))))))
@@ -1006,7 +807,7 @@
    (replace->seq where what 0))
   ([where what place]
    (if+ (sequential? where)
-        (let [place (-> where count (rotate place))]
+        (let [place (-> where count (+rotate place))]
           (-> place
               (take where)
               (concat (drop (inc place) where))
@@ -1046,34 +847,11 @@
   ([where left right]
    (if+ (sequential? where)
         (if- (empty? where)
-             (let [left-value (nth where (rotate (count where) left))
-                   right-value (nth where (rotate (count where) right))]
+             (let [left-value (nth where (+rotate (count where) left))
+                   right-value (nth where (+rotate (count where) right))]
                (-> where
                    (replace->seq right-value left)
                    (replace->seq left-value right)))))))
-
-(defn mix
-  "Takes a function `f` with fewer than normal arguments and two indices: `l` and `r`. Switch places `lth` arg with
-  `rth` arg of `form` if any. Returns new function with args switched. Positively rotates both indices, i.e. counts
-  indices forward, where first element is 0, second is 1 and so on. If index is negative - counts indices negatively,
-  i.e. last element is -1, second to last - -2.
-
-  **Examples**
-
-  ```clojure
-  (mix 0 1 (?fn? :1 :2 :3) :4 :5)
-
-  :=> [:2 :1 :3 :4 :5]
-  ```
-
-  See: [[rotate]] [[|-|]]"
-  [l r & args]
-  (fn [& fargs]
-    (|> args
-        next
-        (concat fargs)
-        (swap l r)
-        (<-> (apply (first args))))))
 
 (defn switch->
   "Takes one `argument` and a function `f` with fewer than normal amount of args. Passes first argument to `f` in first
@@ -1110,3 +888,29 @@
   ```"
   [f & args]
   (apply f args))
+
+
+(defn- -seq-over->
+  [arg index form]
+  (let [index (+rotate (count form) index)]
+    `(let [p# ~arg]
+       (~(first form) ~@(take index (next form)) p# ~@(drop index (next form)))
+       p#)))
+
+(defn- -push-over->
+  [arg index form]
+  (with-meta `(~(first form) ~@(take index (next form)) ~arg ~@(drop index (next form))) (meta form)))
+
+(defn- -natural->
+  [x form]
+  (-push-over-> x 0 form))
+
+(defn- -natural->>
+  [x form]
+  (-push-over-> x -1 form))
+
+(defn- -form-over->
+  [arg form]
+  `(let [p# ~arg]
+     (~form p#)
+     p#))
